@@ -1,0 +1,2448 @@
+///$tab Main
+SET ThousandSep='.';
+SET DecimalSep=',';
+SET MoneyThousandSep='.';
+SET MoneyDecimalSep=',';
+SET MoneyFormat='#.##0,00 €;-#.##0,00 €';
+SET TimeFormat='h:mm:ss';
+SET DateFormat='DD/MM/YYYY';
+SET TimestampFormat='DD/MM/YYYY h:mm:ss[.fff]';
+SET FirstWeekDay=0;
+SET BrokenWeeks=0;
+SET ReferenceDay=4;
+SET FirstMonthOfYear=1;
+SET CollationLocale='es-ES';
+SET CreateSearchIndexOnReload=1;
+SET MonthNames='ene.;feb.;mar.;abr.;may.;jun.;jul.;ago.;sep.;oct.;nov.;dic.';
+SET LongMonthNames='enero;febrero;marzo;abril;mayo;junio;julio;agosto;septiembre;octubre;noviembre;diciembre';
+SET DayNames='lu.;ma.;mi.;ju.;vi.;sá.;do.';
+SET LongDayNames='lunes;martes;miércoles;jueves;viernes;sábado;domingo';
+
+//LIB CONNECT TO 'Desarrollo:AzureSQLServer';
+
+// Filas de la matriz
+DetalleInformeDiario:
+LOAD * INLINE [
+InfDiario_Num, Detalle, Orden
+1, Presupuesto, 1
+2, Días Facturados, 2
+3, Ventas día, 3
+4, Estimado, 4
+5, Desviación, 5
+6, Desviación Abs, 6
+];
+
+
+
+///$tab Sección Acceso old
+/*
+
+NoConcatenate
+data_usuarios:
+Load
+    USUARIO,
+    Correo,
+    If ( WildMatch ( SociedadID, 'Nada' ), "Comercial Clientes", SociedadID )			as SociedadID,
+    "ACCESS",
+;
+Load
+    USUARIO,
+    Correo,
+    Text ( SociedadID )					as SociedadID,
+    "ACCESS",
+    Text ( "Comercial Clientes" )		as "Comercial Clientes"
+From 
+	[lib://Desarrollo:Sharepoint_COMPARTIRDATALAKE/Documentos compartidos/COMPARTIR/Seccion_Acceso_QlikCloud.xlsx] (ooxml, embedded labels, table is Comercial);
+
+
+Concatenate ( data_usuarios )
+Load
+	*
+Inline [
+	Correo, SociedadID, ACCESS
+    qliksense@congeladosnavarra.onmicrosoft.com, *, ADMIN
+];
+
+sociedad_sa:
+Load distinct
+	'*'						as SociedadID,
+    SociedadID				as SociedadID_consolidated
+FROM [lib://Datos:DataFiles/Dim_Sociedad.qvd]
+(qvd)// where IdiomaID = 'S'
+;
+
+
+Concatenate ( sociedad_sa )
+Load distinct
+	SociedadID					as SociedadID,
+    SociedadID					as SociedadID_consolidated
+FROM [lib://Datos:DataFiles/Dim_Sociedad.qvd]
+(qvd)// where IdiomaID = 'S'
+;
+
+Left Join ( data_usuarios )
+Load
+	*
+Resident 
+sociedad_sa;
+
+
+Drop Table sociedad_sa;
+
+
+Section Access;
+
+Seccion_Acceso:
+Load distinct
+	ACCESS,
+	upper ( Correo ) 				as USER.EMAIL,	
+    SociedadID_consolidated			as SociedadID
+Resident data_usuarios;
+
+
+Section Application;
+
+
+Drop Table data_usuarios;
+
+*/
+
+
+
+///$tab Sección acceso old2
+// NoConcatenate
+// data_usuarios:
+// Load distinct
+//     Correo,
+//     Text ( Comercial )					as ComercialID,
+//     "ACCESS"
+// From 
+// 	[lib://Desarrollo:Sharepoint_COMPARTIRDATALAKE/Documentos compartidos/COMPARTIR/Seccion_Acceso_QlikCloud.xlsx] (ooxml, embedded labels, table is Comercial);
+
+
+// Concatenate ( data_usuarios )
+// Load
+// 	*
+// Inline [
+// 	Correo, ComercialID, ACCESS
+//     qliksense@congeladosnavarra.onmicrosoft.com, *, ADMIN
+// ];
+
+
+// comercial_sa:
+// Load distinct
+// 	'*'						as ComercialID,
+//     ComercialID				as ComercialID_consolidated
+// FROM [lib://Datos:DataFiles/Dim_Clientes.qvd]
+// (qvd);
+
+
+// Concatenate ( comercial_sa )
+// Load distinct
+// 	ComercialID					as ComercialID,
+//     ComercialID					as ComercialID_consolidated
+// FROM [lib://Datos:DataFiles/Dim_Clientes.qvd]
+// (qvd);
+
+// Left Join ( data_usuarios )
+// Load
+// 	*
+// Resident 
+// comercial_sa;
+
+
+// Drop Table comercial_sa;
+
+
+// Section Access;
+
+// Seccion_Acceso:
+// Load distinct
+// 	ACCESS,
+// 	upper ( Correo ) 					as USER.EMAIL,	
+//     ComercialID_consolidated			as ComercialID
+// Resident data_usuarios;
+
+
+// Section Application;
+
+
+// Drop Table data_usuarios;
+
+
+
+
+///$tab Calendario
+// 0) Tomar min/max desde Hechos
+// TempMinMaxFecha:
+// LOAD
+//     Floor(Min(FechaNum)) as MinFecha,
+//     Floor(Max(FechaNum)) as MaxFecha
+// Resident Hechos;
+
+// LET vStart = Num(Peek('MinFecha', 0, 'TempMinMaxFecha'));
+// LET vEnd   = Num(Peek('MaxFecha', 0, 'TempMinMaxFecha'));
+
+Let vInicioCalendario = 2020;
+Let vFinCalendario = Year ( Today() ) + 2;
+
+Let vStart = Num ( Floor ( MakeDate( $(vInicioCalendario) ) ) );
+ 
+LET vEnd = Num ( Floor ( YearEnd ( MakeDate ( $(vFinCalendario) ) ) ) );
+
+// Salvaguardas: si vienen null => valores por defecto
+// LET vStart = Alt($(vStart), Floor(YearStart(Today())));
+// LET vEnd   = Alt($(vEnd),   Floor(Today()));
+
+// Fin de año del máximo (31/12 a 00:00)
+LET vEndYear = Floor(YearEnd($(vEnd)));
+
+TRACE vStart=$(vStart);
+TRACE vEnd=$(vEnd);
+TRACE vEndYear=$(vEndYear);
+
+// 1) Espina diaria continua (hasta fin de año)
+NoConcatenate
+CalendarSpine:
+LOAD
+    $(vStart) + IterNo() - 1 as FechaNum // mantener numérico
+AutoGenerate 1
+While $(vStart) + IterNo() - 1 <= $(vEndYear);
+
+QuartersMap:  
+MAPPING LOAD   
+    RowNo() 				as Month,  
+    'Q' & Ceil (RowNo()/3) 	as Quarter  
+AUTOGENERATE (12); 
+
+// 2) Tabla Calendario a partir de la espina (NO desde Hechos)
+NoConcatenate
+Calendario:
+LOAD DISTINCT
+	FechaNum											as FechaNum,
+    FechaNum											as Existe_FechaNum,
+    Date ( FechaNum, 'DD/MM/YYYY' )											as Fecha,
+    Year(FechaNum)										as Año,
+    Month(FechaNum)										as Mes,    
+	Week(FechaNum) 										as Semana,
+	num(Month(FechaNum)) 								as [Nº Mes],  
+    Day(FechaNum) 										as Día,  
+    Date(MonthStart(FechaNum), 'MMM-YYYY') 				as [Año Mes],
+    Num(MonthName(FechaNum)) 							as [NumAñoMes],
+    ApplyMap('QuartersMap', Month(FechaNum), Null()) 	as Trimestre, 
+    Year(FechaNum) &'/'& Week(FechaNum) 				as [Año Semana],
+    Day(FechaNum)&'-'& Month(FechaNum) 					as [Día Mes],
+    WeekDay(FechaNum) 									as [Día Semana] 
+Resident CalendarSpine;
+
+DROP Table CalendarSpine;
+
+/*
+QuartersMap:  
+MAPPING LOAD   
+    RowNo() 				as Month,  
+    'Q' & Ceil (RowNo()/3) 	as Quarter  
+AUTOGENERATE (12);  
+
+Calendario:
+load Distinct
+	FechaNum											as FechaNum,
+    FechaNum											as Fecha,
+    Year(FechaNum)										as Año,
+    Month(FechaNum)										as Mes,    
+	Week(FechaNum) 										as Semana,
+	num(Month(FechaNum)) 								as [Nº Mes],  
+    Day(FechaNum) 										as Día,  
+    Date(MonthStart(FechaNum), 'MMM-YYYY') 				as [Año Mes],
+    Num(MonthName(FechaNum)) 							as [NumAñoMes],
+    ApplyMap('QuartersMap', Month(FechaNum), Null()) 	as Trimestre, 
+    Year(FechaNum) &'/'& Week(FechaNum) 				as [Año Semana],
+    Day(FechaNum)&'-'& Month(FechaNum) 					as [Día Mes],
+    WeekDay(FechaNum) 									as [Día Semana]  
+Resident Hechos;
+*/
+
+
+///$tab Mappings
+//============================================================================================================================================
+// Aplicación:          		CN - Compras
+// Autor:               		Mercanza
+// Fecha Creación:      		12-11-2024
+// Objetivo de la App:  		Aplicación que genera la logica de compras
+// Objetivo de la pestaña:   	Mappings
+//============================================================================================================================================
+
+
+MotivosRechazo:
+MAPPING LOAD
+    MotivoRechazoID,
+    MotivoRechazo
+FROM [lib://Datos:DataFiles/Dim_MotivosRechazo.qvd]
+(qvd) where IdiomaID = 'S';
+
+
+
+mCanalCliente:
+Mapping Load
+	ClienteID						as id,
+    GrupoCanalID & '-' & PaisID		as result
+From [lib://Datos:DataFiles/Dim_Clientes.qvd] (qvd);
+
+
+
+mGrupo:
+Mapping Load distinct
+    GrupoID															as id,
+    Grupo															as result
+From [lib://Datos:DataFiles/Dim_Grupo.qvd] (qvd)
+Where IdiomaID = 'S';
+
+
+///$tab Flags Ventas Anterior
+
+///$tab Motivo Rechazo
+//============================================================================================================================================
+// Aplicación:          		CN - Compras
+// Autor:               		Mercanza
+// Fecha Creación:      		12-11-2024
+// Objetivo de la App:  		Aplicación que genera la logica de compras
+// Objetivo de la pestaña:   	Auxiliar Motivo rechazo
+//============================================================================================================================================
+
+
+MotivosRechazo:
+LOAD
+    MotivoRechazoID,
+    MotivoRechazo
+FROM [lib://Datos:DataFiles/Dim_MotivosRechazo.qvd]
+(qvd) where IdiomaID = 'S';
+
+///$tab Sociedad
+//============================================================================================================================================
+// Aplicación:          		CN - Compras
+// Autor:               		Mercanza
+// Fecha Creación:      		12-11-2024
+// Objetivo de la App:  		Aplicación que genera la logica de compras
+// Objetivo de la pestaña:   	Maestro Sociedad
+//============================================================================================================================================
+
+
+Dim_Sociedad:
+LOAD
+    SociedadID,
+    Sociedad
+FROM [lib://Datos:DataFiles/Dim_Sociedad.qvd]
+(qvd)// where IdiomaID = 'S'
+;
+
+
+///$tab Region
+//============================================================================================================================================
+// Aplicación:          		CN - Compras
+// Autor:               		Mercanza
+// Fecha Creación:      		12-11-2024
+// Objetivo de la App:  		Aplicación que genera la logica de compras
+// Objetivo de la pestaña:   	Maestro Región
+//============================================================================================================================================
+
+Dim_Region:
+LOAD
+ 	PaisID&'-'&RegionID					as PaisRegionID, 
+    Region
+FROM [lib://Datos:DataFiles/Dim_Region.qvd]
+(qvd) where IdiomaID = 'S';
+
+
+///$tab Pais
+//============================================================================================================================================
+// Aplicación:          		CN - Compras
+// Autor:               		Mercanza
+// Fecha Creación:      		12-11-2024
+// Objetivo de la App:  		Aplicación que genera la logica de compras
+// Objetivo de la pestaña:   	Maestro Paises
+//============================================================================================================================================
+
+/*
+Dim_Pais:
+LOAD
+    PaisID,
+    Pais,
+    PaisID                                                          as PaisINEID
+FROM [lib://Datos:DataFiles/Dim_Pais.qvd]
+(qvd) where IdiomaID = 'S';
+ 
+Dim_PaisINE:
+LOAD
+    Codigo     as   PaisINEID,
+ 	TipoDeMercado
+FROM [lib://Datos:DataFiles/Dim_EstadisticaINEPaises.qvd]
+(qvd);
+*/
+
+
+
+Dim_Pais:
+LOAD 
+     PaisID,
+    Pais,
+    PaisID                                                          as PaisINEID
+FROM  [lib://Datos:DataFiles/Dim_Pais.qvd]
+(qvd) where IdiomaID = 'S';
+ 
+INNER JOIN 
+LOAD
+    Codigo     as   PaisINEID,
+ 	TipoDeMercado
+FROM [lib://Datos:DataFiles/Dim_EstadisticaINEPaises.qvd]
+(qvd);
+///$tab Canal
+//============================================================================================================================================
+// Aplicación:          		CN - Compras
+// Autor:               		Mercanza
+// Fecha Creación:      		12-11-2024
+// Objetivo de la App:  		Aplicación que genera la logica de compras
+// Objetivo de la pestaña:   	Maestro Grupo Canal
+//============================================================================================================================================
+
+Dim_GrupoCanal:
+LOAD
+    GrupoCanalID,
+    GrupoCanal,
+    Canal
+FROM [lib://Datos:DataFiles/Dim_GrupoCanal.qvd]
+(qvd) where IdiomaID = 'S';
+
+
+///$tab Canal País
+/*
+
+TEMP_CanalPais:
+LOAD DISTINCT
+    GrupoCanalID,
+    PaisID
+FROM [lib://Datos:DataFiles/Dim_Clientes.qvd]
+(qvd);
+LEFT JOIN (TEMP_CanalPais)
+LOAD
+    GrupoCanalID,
+    Canal
+RESIDENT Dim_GrupoCanal;
+ 
+Dim_CanalPais:
+LOAD
+   	GrupoCanalID&'-'&PaisID								as PK_CanalPais,
+    if(
+        Match(GrupoCanalID, 'Z1', 'E1'),
+        if(Match(PaisID, 'ES', 'PT'), 'Industria ES-PT', 'Industria Resto'),
+    if(
+        Match(GrupoCanalID, 'Z3', 'E3'),
+        if(Match(PaisID, 'ES', 'PT'), 'Retail ES-PT', 'Retail Resto'),
+
+
+
+
+    if(
+        Match(GrupoCanalID, 'Z4', 'E4','E5'),
+        if(Match(PaisID, 'ES', 'PT'), 'Food Service ES-PT', 'Food Service Resto'),
+    Canal
+    )))                                                               as CanalPais
+RESIDENT TEMP_CanalPais
+;
+ 
+DROP TABLE TEMP_CanalPais;
+
+*/
+
+Dim_CanalPais:
+LOAD
+    GrupoCanalID & '-' & PaisID										as PK_CanalPais,
+    CanalPais														as OG_CanalPais,
+    if(Match(CanalPais,'Transportistas', 'Proveedores', 'Camaras'),
+    'Otros', CanalPais)												as CanalPais
+FROM [lib://Datos:DataFiles/Dim_CanalPais.qvd] (qvd)
+wHERE IdiomaID = 'S';
+
+///$tab Tarifas
+// //============================================================================================================================================
+// // Aplicación:          		CN - Compras
+// // Autor:               		Mercanza
+// // Fecha Creación:      		12-11-2024
+// // Objetivo de la App:  		Aplicación que genera la logica de compras
+// // Objetivo de la pestaña:   	Maestro tarifas
+// //============================================================================================================================================
+
+Dim_Tarifas:
+LOAD
+	OrganizacionVentasID&'-'&Text(ClienteID)									as "PK_Clientes",
+    MandanteID,
+    //OrganizacionVentasID,
+	//ClienteID,
+    Referencia														as Referencia_Tarifas,
+    ReferenciaCliente												as ReferenciaClienteTarifas,
+    FechaInicioValidacion,
+    FechaFinValidacion,
+    Vigente			 												as VigenteTarifas,
+    PrecioTarifa,
+    PrecioTarifaKg,
+    MonedaTarifa,
+    UnidadMedidaTarifa,
+    FlagTarifa
+FROM [lib://Datos:DataFiles/Dim_Tarifas.qvd] (qvd);
+
+
+
+
+
+
+
+
+
+/*
+
+//Por el momento lo cargamos de forma independiente
+Dim_TarifasCliente:
+LOAD
+//     MandanteID,
+    OrganizacionVentasID			as OrganizacionVentasIDCliente,
+    ClienteID						as ClienteIDCliente,
+    Referencia						as ReferenciaCliente,
+    Articulo						as ArticuloCliente,
+    FechaFinValidacion				as FechaFinValidacionCliente,
+    FechaInicioValidacion			as FechaInicioValidacionCliente,
+    Vigente							as VigenteTarifaCliente,
+    PrecioTarifa					as PrecioTarifaCliente,
+    MonedaTarifa					as MonedaTarifaCliente,
+    UnidadMedidaTarifa				as UnidadMedidaTarifaCliente,
+    FlagTarifa						as FlagTarifaCliente,
+    OrganizacionVentasID&'-'&ClienteID								as "PK_Clientes"
+FROM [lib://Datos:DataFiles/Dim_TarifasCliente.qvd]
+(qvd);
+
+
+
+
+Dim_TarifasGrupo:
+LOAD
+//     MandanteID,
+    OrganizacionVentasID			as OrganizacionVentasIDGrupo,
+    GrupoID							as GrupoIDGrupo,
+    Referencia						as ReferenciaGrupo,
+    Articulo						as ArticuloGrupo,
+    FechaFinValidacion				as FechaFinValidacionGrupo,
+    FechaInicioValidacion			as FechaInicioValidacionGrupo,
+    Vigente							as VigenteTarifaGrupo,
+    PrecioTarifa					as PrecioTarifaGrupo,
+    MonedaTarifa					as MonedaTarifaGrupo,
+    UnidadMedidaTarifa				as UnidadMedidaTarifaGrupo,
+    FlagTarifa						as FlagTarifaGrupo,
+    OrganizacionVentasID&'-'&GrupoID								as "PK_Grupo"
+FROM [lib://Datos:DataFiles/Dim_TarifasGrupo.qvd]
+(qvd);
+
+
+
+
+
+
+
+
+// Qualify*;
+// LOAD
+//     OrganizacionVentasID,
+//     ClienteID,
+//     ClienteNombre,
+//     Referencia,
+//     Articulo,
+//     FechaFinValidacion,
+//     FechaInicioValidacion,
+//     PrecioTarifa,
+//     MonedaTarifa,
+//     UnidadMedidaTarifa,
+//    	Vigente,
+//     FlagTarifa
+// FROM [lib://Datos:DataFiles/Dim_Tarifas.qvd]
+// (qvd);
+
+// Unqualify *;
+
+*/
+
+
+
+
+
+///$tab PVR
+//============================================================================================================================================
+// Aplicación:          		CN - Compras
+// Autor:               		Mercanza
+// Fecha Creación:      		12-11-2024
+// Objetivo de la App:  		Aplicación que genera la logica de compras
+// Objetivo de la pestaña:   	Maestro PVR
+//============================================================================================================================================
+
+Dim_PVR:
+LOAD
+    Tipo,
+    Referencia										as Referencia_PVR,
+    Descripcion										as Descripcion_PVR,
+    Familia											as Familia_PVR,
+    Proceso											as Proceso_PVR,
+    Num(Round(PVR,0.01),'#.##0,00')					as PVR,
+    Num(Round(CosteUnitarioTotal,0.01),'#.##0,00')	as CosteUnitarioTotal,
+    
+    FechaNum
+FROM [lib://Datos:DataFiles/Dim_PVR.qvd]
+(qvd);
+
+
+
+Dim_PVREnvasado:
+LOAD
+    AñoEnvasado,
+    NumBolsasXFormatoBolsa,
+    FormatoEnGrBolsa,
+    TipoDeBolsa,
+    CosteVarEnvasado,
+    PVREnvasado,
+    FechaNum
+FROM [lib://Datos:DataFiles/Dim_PVREnvasado.qvd]
+(qvd);
+
+
+
+
+
+
+
+///$tab Pedidos Clientes
+Dim_DatosComercialesCabecera:
+
+LOAD
+    //MandanteID,
+    FacturaID         as VentasID,
+    //NumeroLinea,
+    CompraID          as PedidoCliente
+FROM [lib://Datos:DataFiles/Dim_DatosComercialesCabecera.qvd]
+(qvd);
+
+
+///$tab Grupo
+Dim_Grupo:
+LOAD
+    //MandanteID,
+    //IdiomaID,
+    GrupoID															as GrupoIDClientes,
+    Grupo
+FROM [lib://Datos:DataFiles/Dim_Grupo.qvd]
+(qvd)
+ where IdiomaID = 'S';
+
+
+
+///$tab Destinatarios
+//============================================================================================================================================
+// Aplicación:          		CN - Compras
+// Autor:               		Mercanza
+// Fecha Creación:      		12-11-2024
+// Objetivo de la App:  		Aplicación que genera la logica de compras
+// Objetivo de la pestaña:   	Maestro Destinatarios
+//============================================================================================================================================
+
+Dim_Destinatarios:
+LOAD
+   	OrganizacionVentasID&'-'&Text(ClienteID)									as "PK_Destinatario",
+    OrganizacionVentasID&'-'&Text(ClienteID)									as "PK_Destinatario_Propiedades",
+	//GrupoCanalID													as GrupoCanalDestinatarioID,
+	//PaisID															as PaisDestinatarioID, 
+    //ClienteRegionID													as RegionID, 
+    //PaisID&'-'&ClienteRegionID										as PaisRegionID,
+	ClienteNombre													as DestinatarioNombre, 
+	ClienteCodigoPostal												as DestinatarioCodigoPostal, 
+	//AtencionClienteID												as AtencionClienteID, 
+	//AtencionCliente													as AtencionCliente, 
+	//ComercialID														as ComercialID,	 
+	//Comercial														as Comercial, 
+	Inactivo														as DestinatarioInactivo,
+    ClientePoblacion												as DestinatarioCiudad,
+    ClienteCalle													as DestinatarioDireccion
+    
+FROM [lib://Datos:DataFiles/Dim_Clientes.qvd]
+(qvd)
+//revisar esto
+//where Destinatario = 1
+;
+
+
+/*
+Dim_Destinatarios:
+LOAD
+	ClienteID														as DestinatarioID,
+	ClienteNombre													as Destinatario
+FROM [lib://Datos:DataFiles/Dim_Clientes.qvd] (qvd)
+where Destinatario = 1;
+*/
+///$tab Materiales
+//============================================================================================================================================
+// Aplicación:          		CN - Compras
+// Autor:               		Mercanza
+// Fecha Creación:      		12-11-2024
+// Objetivo de la App:  		Aplicación que genera la logica de compras
+// Objetivo de la pestaña:   	Maestro Materiales
+//============================================================================================================================================
+
+Dim_Materiales:
+/*
+LOAD
+    Referencia,
+    Articulo,
+    FamiliaID,
+    Familia,
+    PesoPalet,
+    PesoCaja,
+    PesoBolsa,
+    UnidadMedida,
+    TipoMaterial,
+    MarcaID,
+    Marca,
+    "Color",
+    Proceso,
+    Envase,
+    Calibre,
+    Forma,
+    MTO_MTS,
+    CicloDeVidaID,
+    CicloDeVida,
+    CorteCalibre,
+    IF(Vigente = 1, 'Si', 'No') 					as Vigente
+FROM [lib://Datos:DataFiles/Dim_Materiales.qvd]
+(qvd) where IdiomaID = 'S';
+
+*/
+
+LOAD
+// 	MandanteID 		as MandanteIDMat,
+    Referencia,
+    DescripcionLarga as Articulo,
+    "Referencia-Articulo",
+    IdiomaID,
+    FamiliaID,
+    PesoPalet,
+    PesoCaja,
+    PesoBolsa,
+    UnidadMedida,
+    Familia,
+    TipoMaterial,
+    MarcaID,
+    Marca,
+    ColorID,
+    "Color",
+    ProcesoID,
+    Proceso,
+    EnvaseID,
+    Envase,
+    CalibreID,
+    Calibre,
+    FormaID,
+    Forma,
+    MTO_MTSID,
+    MTO_MTS,
+    CicloDeVidaID,
+    CicloDeVida,
+    AlturaID,
+    AlturaMaximaID,
+    AlturaMaxima,
+    BabyFood,
+    BaseID,
+    CalidadID,
+    Calidad,
+    CategoriaID,
+    Categoria,
+    CorteCalibreID,
+    CorteCalibre,
+    EcologicoID,
+    FormatoID,
+    Formato,
+    LongitudID,
+    Longitud,
+    MosaicoID,
+    Mosaico,
+    MultiProductoID,
+    PaletEspecial,
+    PaletEspecialID,
+    RemontadoID,
+    Remontado,
+    RotacionID,
+    Rotacion,
+    RotacionID2,
+    TaraID,
+    Tara,
+    TenderometriaID,
+    Tenderometria,
+    TipoFilmID,
+    TipoFilm,
+    UnidadesEnvaseID,
+    UnidadesEnvase,
+    IF(Vigente = 1, 'Si', 'No') 					as Vigente,
+    "Maestro Materiales",
+    MaterialCongel,
+    GramosFormato,
+    "Categoria Especial Formato",
+    NivelServicioFilm,
+    CicloDeVidaFecha,
+    CategoriaTipoMaterial,
+    TipoMaterialNombre,
+    GamaID,
+    Gama
+    
+    
+FROM [lib://Datos:DataFiles/Dim_Materiales.qvd]
+(qvd)
+ where IdiomaID = 'S'
+ AND WildMatch([TipoMaterial], 'ZG14','ZG15','ZG16','ZG28', 'ZG23')>0;
+
+Dim_Materiales_Tarifas:
+LOAD
+// 	MandanteID 		as MandanteIDMat,
+    Referencia 					as Referencia_Tarifas,
+    DescripcionLarga 					as Articulo_Tarifas,
+    "Referencia-Articulo" 		as "Referencia-Articulo_Tarifas",
+    FamiliaID 					as FamiliaID_Tarifas,
+    Familia 					as Familia_Tarifas,
+    TipoMaterial 				as TipoMaterial_Tarifas,
+    MarcaID 					as MarcaID_Tarifas,
+    Marca 						as Marca_Tarifas,
+    IF(Vigente = 1, 'Si', 'No') 					as VigenteMaterialesTarifas
+FROM [lib://Datos:DataFiles/Dim_Materiales.qvd]
+(qvd)
+ where IdiomaID = 'S';
+ 
+
+///$tab Recetas
+//============================================================================================================================================
+// Aplicación:          		CN - Compras
+// Autor:               		Mercanza
+// Fecha Creación:      		12-11-2024
+// Objetivo de la App:  		Aplicación que genera la logica de compras
+// Objetivo de la pestaña:   	Maestro Receta
+//============================================================================================================================================
+
+
+Dim_Recetas:
+LOAD
+    Referencia,
+    ComponenteReferencia,
+    OrdenComponente,
+    EsSustitutoComponente,
+    CantidadComponente,
+    UMComponente,
+    PlantaComponente,
+    ComponenteSinReceta
+FROM [lib://Datos:DataFiles/Dim_Receta.qvd]
+(qvd)
+where VigenteComponente <> 0;
+
+
+///$tab PedidosVentas
+Hechos:
+LOAD
+    VentasID,
+   	Text(ClienteID)			as ClienteID, 
+    OrganizacionVentasID,
+    FechaPrevistaEntrega    as FechaNum,
+    FechaNum                as FechaPedido,
+    Referencia,
+    SociedadID,
+    MotivoRechazoID,
+    ImporteLineaPedidosVentasVenta,
+    MonedaPedidosVentasVenta,
+    LineaVentas																	as LineaPedidoVenta,
+    ImporteLineaPedidosVentasGrupo,
+    ImporteLineaPedidosVentasSociedad,
+    MonedaPedidosVentaGrupo,
+    MonedaPedidosVentaSociedad,
+    PesoNeto,          
+	UnidadPeso,
+	PrecioNeto,
+    TipoPedido,
+    CantidadSolicitada,
+    KgsSolicitadosPedido,
+    CantidadPedido,
+    UnidadMedidaHechos,
+    KgsSolicitadosInicialPedido,
+    'Fact_PedidosVentas'														as "Origen",
+    'PedidosVentas'																as "Origen_Filtro",
+    OrganizacionVentasID&'-'&Text(ClienteID)									as "PK_Clientes",
+    //16/09/2025 JGC: Añadir campo para la tabla entregas
+    SolicitanteID,
+    DestinatarioID
+FROM [lib://Datos:DataFiles/Fact_PedidosVentas.qvd]
+(qvd);
+
+
+
+//LOAD
+  
+//     CondicionID,
+//     FechaVenta,
+//     TipoDocumento,
+//     OficinaID,
+//     FechaCreacionDocumento,
+//     FechaCliente,
+//     FechaInicioValidez,
+//     FechaFinValidez,
+//     AtencionClienteHechosID,
+//     Creador,
+//     LineaVentas,
+//     MotivoRechazoID,
+//     Objetivo,
+//     ImporteLineaVenta,
+//     CantidadPedido,
+//     CantidadSolicitada,
+//     UnidadMedidaHechos,
+//     PesoNeto,
+//     UnidadPeso,
+//     ContratoID,
+//     ContratoPosicionID,
+//     CentroID,
+//     PrecioNeto,
+//     FactorConversion,
+//     UnidadMedidaBase,
+//     ImporteDivisa,
+//     RatioCambio,
+//     FechaIncremental,
+//     CosteUnitarioPedido,
+//     PrecioUnitarioPedido,
+//     PrecioKGPedido,
+//     PrecioKGPedidoEUR,
+//     KgsSolicitadosPedido,
+//     KgsSolicitadosInicialPedido,
+//     TipoPedido,
+//     FechaNum,
+//     ImporteLineaGrupo,
+//     ImporteLineaSociedad,
+//     MonedaGrupo,
+//     MonedaSociedad
+// FROM [lib://Datos:DataFiles/Fact_PedidosVentas.qvd]
+// (qvd);
+
+
+
+// concatenate(Hechos)
+Pedidos:
+Load
+	OrganizacionVentasID&'-'&Text(ClienteID)						as "PK_Clientes",
+	KgsSolicitadosPedido											as KgsSolicitadosPedido1,
+    KgsSolicitadosInicialPedido										as KgsSolicitadosInicialPedido1,
+    LineaVentasOriginal,
+    ReferenciaOriginal,
+    EsCC
+FROM [lib://Datos:DataFiles/Fact_SituacionPedidosVentas.qvd]
+(qvd)
+where EsCC='No';
+
+
+
+
+
+///$tab PedidosVentasCrosscompany
+Concatenate(Hechos)
+LOAD
+    VentasID,
+    SociedadID,
+    Text(ClienteID)		as ClienteID,
+    OrganizacionVentasID,
+    FechaPrevistaEntrega,
+    MonedaPedidosVentasCCVenta as MonedaPedidosVentaVenta,
+    LineaVentas,
+    Referencia,
+    MotivoRechazoID,
+    ImporteLineaPedidosVentasCCVenta as ImporteLineaPedidosVentasVenta,
+    CantidadPedido,
+    CantidadSolicitada,
+    UnidadMedidaHechos,
+    PesoNeto,
+    UnidadPeso,
+//     CentroID,
+    PrecioNeto,
+    CosteUnitarioPedido,
+    PrecioUnitarioPedido,
+    PrecioKGPedidoCC as PrecioKGPedido,
+    PrecioKGPedidoEURCC as PrecioKGPedidoEUR,
+    KgsSolicitadosPedidoCC as KgsSolicitadosPedido,
+    KgsSolicitadosInicialPedidoCC as KgsSolicitadosInicialPedido,
+    TipoPedido,
+    FechaNum,
+    ImporteLineaPedidosVentasCCGrupo as ImporteLineaPedidosVentasGrupo,
+    ImporteLineaPedidosVentasCCSociedad as ImporteLineaPedidosVentasSociedad,
+    MonedaPedidosVentaCCGrupo as MonedaPedidosVentaGrupo,
+    MonedaPedidosVentaCCSociedad as MonedaPedidosVentaCCSociedad,
+    'Fact_PedidosVentasCrosscompany'											as "Origen",
+    'PedidosVentas'																as "Origen_Filtro",
+    OrganizacionVentasID&'-'&Text(ClienteID)												as "PK_Clientes"
+FROM [lib://Datos:DataFiles/Fact_PedidosVentasCrosscompany.qvd]
+(qvd);
+
+
+
+
+// Concatenate(Hechos)
+// LOAD
+//     VentasID,
+//     SociedadID,
+//     ClienteID,
+//     OrganizacionVentasID,
+//     FechaPrevistaEntrega,
+//     MonedaPedidosVentasCCVenta,
+//     LineaVentas,
+//     Referencia,
+//     MotivoRechazoID,
+//     ImporteLineaPedidosVentasCCVenta,
+//     CantidadPedido							as CantidadPedidoCC,
+//     CantidadSolicitada						as CantidadSolicitaCC,
+//     UnidadMedidaHechos,
+//     PesoNeto								as PesoNetoCC,
+//     UnidadPeso,
+// //     CentroID,
+//     PrecioNeto,
+//     CosteUnitarioPedido,
+//     PrecioUnitarioPedido,
+//     PrecioKGPedidoCC,
+//     PrecioKGPedidoEURCC,
+//     KgsSolicitadosPedidoCC,
+//     KgsSolicitadosInicialPedidoCC,
+//     TipoPedido,
+//     FechaNum,
+//     ImporteLineaPedidosVentasCCGrupo,
+//     ImporteLineaPedidosVentasCCSociedad,
+//     MonedaPedidosVentaCCGrupo,
+//     MonedaPedidosVentaCCSociedad,
+//     'Fact_PedidosVentasCrosscompany'											as "Origen",
+//     OrganizacionVentasID&'-'&ClienteID											as "PK_Clientes"
+// FROM [lib://Datos:DataFiles/Fact_PedidosVentasCrosscompany.qvd]
+// (qvd);
+
+///$tab Contratos Ventas
+Concatenate(Hechos)
+LOAD
+//     MandanteID,
+    ContratoVentasID,
+    LineaContratoVentas,
+    ContratoVentasID & '..'& LineaContratoVentas AS PK_ContratoLinea,
+    UnidadMedidaHechos,
+    PrecioUnitarioContratoVentas,
+    CantidadBaseContratoVentas,
+    KgsSolicitadosContrato,
+    Referencia,
+    UnidadMedidaBase,
+    PrecioKGContratoVentas,
+    Text(ClienteID)		as ClienteID,
+    ImporteLineaContratoVentasVenta,
+    MonedaContratoVentasVenta,
+    ImporteLineaContratoVentasGrupo,
+    MonedaContratoVentasGrupo,
+    ImporteLineaContratoVentasSociedad,
+    MonedaContratoVentasSociedad,
+    FechaContratoVentas,
+    FechaNum,
+    TipoDocumento,
+    SociedadID,
+    OficinaID,
+    AtencionClienteHechosID,
+    TipoContratoVentas,
+    FechaInicioValidez,
+    FechaFinValidez,
+    OrganizacionVentasID,
+    KilosServidosMasPedidosContrato,
+    'Fact_ContratosVentas'														as Origen,
+    'ContratosVentas'														as Origen_Filtro,
+    OrganizacionVentasID&'-'&Text(ClienteID)												as "PK_Clientes",
+    OrganizacionVentasID&'-'&Text(ClienteID)												as "PK_ClientesPropiedades"
+FROM [lib://Datos:DataFiles/Fact_ContratosVentas.qvd]
+(qvd);
+
+
+///$tab Abonos
+Concatenate(Hechos)
+LOAD
+    AbonoID,
+    CanalAbonoID,
+    TipoAbono,
+    Text(ClienteID)	 	as ClienteID,
+    OrganizacionVentasID,
+    SociedadID,
+    FechaAbono,
+    LineaPedido,
+    LineaAbono,
+    EntregaAbonoID,
+    PosicionEntregaAbono,
+    TipoCambioAbono,
+    MotivoAbonoID,
+    PedidoDevolucionID,
+    ImporteLineaAbonoVenta,
+    Referencia,
+    FechaContabAbono,
+    FechaNum,
+    MonedaAbonoVenta,
+    MonedaAbonoGrupo,
+    MonedaAbonoSociedad,
+    ImporteLineaAbonoGrupo,
+    ImporteLineaAbonoSociedad,
+    OrganizacionVentasID&'-'&Text(ClienteID)								as "PK_Clientes",
+    'Fact_Abonos'												as Origen,
+    'Abonos'												as Origen_Filtro
+FROM [lib://Datos:DataFiles/Fact_Abonos.qvd]
+(qvd);
+
+
+///$tab Facturas
+Concatenate(Hechos)
+LOAD
+    FacturaID,
+    TipoFactura,
+    FechaFactura,
+    FechaNum,
+    Text(ClienteID)	 as ClienteID,
+    LineaFactura,
+    Referencia,
+    TipoDeCambioCabecera,
+    OrganizacionVentasID,
+    ImporteLineaFacturasVenta,
+    EntregaFacturaID,
+    PosicionEntrega,
+    CentroID,
+    FechaContabFactura,
+    SociedadID,
+    MonedaFacturasVenta,
+    MonedaFacturasGrupo,
+    MonedaFacturasSociedad,
+    ImporteLineaFacturasGrupo,
+    ImporteLineaFacturasSociedad,
+    'Fact_Facturas'												as Origen,
+    'Facturas'												as Origen_Filtro,
+    OrganizacionVentasID&'-'&Text(ClienteID)								as "PK_Clientes"
+FROM [lib://Datos:DataFiles/Fact_Facturas.qvd]
+(qvd);
+
+
+///$tab Presupuestos
+Concatenate(Hechos)   
+LOAD
+    SociedadID,
+//     OrganizacionVentasID,
+    Text(ClienteID)	 as ClienteID,
+//     EmpleadoID,
+    Referencia,
+    If( MatchRegEx( Referencia, '.*[A-Za-z].*'), 1, 0)														as [FlagReferenciaTexto],
+    AñoPresupuesto,
+    MesPresupuesto,
+    CantidadPresupuesto,
+    ImportePresupuesto,
+    AtipicosPresupuesto,
+    TransportePresupuesto,
+    CosteFijoPresupuesto,
+    CosteVariablesPresupuesto,
+    FechaNum,
+ 
+    'Fact_Presupuestos'																							as Origen,
+    'Presupuestos'																								as Origen_Filtro,
+    OrganizacionVentasID&'-'&Text(ClienteID)																				as "PK_Clientes",
+    Alt ( ImportePresupuesto, 0 ) - Alt ( AtipicosPresupuesto, 0 ) 
+    	- Alt ( TransportePresupuesto, 0 ) - Alt ( CantidadPresupuesto, 0 ) * Alt ( CosteVariablesPresupuesto )	as [Margen Presupuestos]
+
+
+FROM [lib://Datos:DataFiles/Fact_PresupuestosVentas.qvd]
+(qvd);
+
+
+
+
+///$tab Previsiones
+Concatenate(Hechos)
+LOAD
+    AñoPrevision,
+    CentroID,
+    Text(ClienteID)	 as ClienteID,
+    Referencia,
+    SociedadID,
+//     Empresa,
+    OrganizacionVentasID,
+    MesPrevision,
+    Kilos as [Kilos Previsiones],
+    CosteFijoPrevisiones,
+    CosteVariablePrevisiones,
+    CostePresupuestoPrevisiones,
+    FechaNum,
+    'Fact_Previsiones'										as Origen,
+    'Previsiones'											as Origen_Filtro,
+    OrganizacionVentasID&'-'&Text(ClienteID)							as "PK_Clientes"
+FROM [lib://Datos:DataFiles/Fact_Previsiones.qvd]
+(qvd);
+
+
+Concatenate(Hechos)
+LOAD
+	AñoPrevision,
+	CentroID,
+    Text ( ClienteID )						as ClienteID,    
+    Referencia,
+    SociedadID,		
+    SociedadID								as OrganizacionVentasID,
+    Mes										as MesPrevision,
+    Kilos									as [Kilos Previsiones],
+    'Fact_Previsiones'						as Origen,
+    'Previsiones'							as Origen_Filtro,
+	 SociedadID & '-' & Text(ClienteID)		as "PK_Clientes",
+     FechaNum
+FROM [lib://Datos:DataFiles/Fact_PrevisionesCC.qvd]
+(qvd);
+
+
+
+
+///$tab Atipicos
+Concatenate(Hechos)
+LOAD
+    OrganizacionVentasID,
+    Text(ClienteID)	 as ClienteID,
+    AñoMesFiscal,
+    Referencia,
+    SociedadID,
+    CuentaContable,
+    ImporteAtipicosSociedad,
+    MonedaAtipicosSociedad,
+    Libro,
+    PedidoID,
+    FechaIncremental,
+    FechaNum,
+    ImporteAtipicosVenta,
+    MonedaAtipicosVenta,
+    ImporteAtipicosGrupo,
+    MonedaAtipicosGrupo,
+    'Fact_Atipicos'												as Origen,
+    'Atipicos'												as Origen_Filtro,
+    OrganizacionVentasID&'-'&Text(ClienteID)								as "PK_Clientes"
+FROM [lib://Datos:DataFiles/Fact_Atipicos.qvd]
+(qvd);
+
+
+///$tab Stock
+//stock a dia de hoy
+Concatenate(Hechos)
+LOAD
+	SociedadID,
+    Referencia,
+    LoteID,
+    CentroID,
+    AlmacenID,
+    StockLibreUtilizacion,
+    StockCalidad,
+    StockBloqueado,
+    StockTotal,
+    FechaNum,
+    'Actual' 														as TipoStock,
+    'Fact_Stock_Actual'												as Origen,
+    'Stock'												as Origen_Filtro
+FROM [lib://Datos:DataFiles/Fact_Stock_Actual.qvd]
+(qvd);
+
+
+//Stock a ultimo dia del mes
+Concatenate(Hechos)
+LOAD
+	SociedadID,
+    Referencia,
+    LoteID,
+    CentroID,
+    AlmacenID,
+    StockLibreUtilizacion,
+    StockCalidad,
+    StockBloqueado,
+    StockTotal,
+    FechaNum,
+    'Mensual' 														as TipoStock,
+    'Fact_Stock_Mensual'											as Origen,
+    'Stock'											as Origen_Filtro
+FROM [lib://Datos:DataFiles/Fact_Stock_Mensual.qvd]
+(qvd);
+
+
+
+///$tab Ordenes de transporte
+// Concatenate(Hechos)
+// LOAD
+// 	FechaNum,
+//     OrdenTransporteID,
+//     ClaseDocumTransporte,
+//     EntregaID,
+//     PesoTotal,
+//     PesoUM,
+//     QtyTotal,
+//     QtyUM,
+//     OrganizacionVentasID,
+//     ClienteID,
+//     Reparto,
+//     CostePorKilo,
+//     'Fact_OT'												as Origen,
+//     OrganizacionVentasID&'-'&ClienteID						as "PK_Clientes",
+//     OrganizacionVentasID&'-'&ClienteID						as "PK_ClientesPropiedades"
+// FROM [lib://Datos:DataFiles/Fact_OT.qvd]
+// (qvd);
+
+
+///$tab Costes
+//Solo es los costes reales
+Concatenate(Hechos)
+LOAD
+    SociedadID,
+    Referencia,
+    Descripcion,
+    AñoCostes,
+    MesCostes,
+    CosteVariableCostes,
+    CosteFijoCostes,
+    FechaNum,
+    'Fact_Costes'								as Origen,
+    'Costes'								as Origen_Filtro
+FROM [lib://Datos:DataFiles/Fact_Costes.qvd]
+(qvd);
+
+
+///$tab Entregas
+//quitar después
+//LIB CONNECT TO 'Desarrollo:AzureSQLServer';
+
+Concatenate(Hechos)
+LOAD
+    Text(ClienteID)	 as ClienteID,
+    SociedadID,
+    EntregaID,
+    LineaEntrega,
+//     MandanteID,
+    Referencia,
+    If( MatchRegEx( Referencia, '.*[A-Za-z].*'), 1, 0)						as [FlagReferenciaTexto],
+    CentroID,
+    LoteID,
+    UnidadMedidaEntregas,
+    DocumentoReferenciaID,
+    ArticuloReferenciaID,
+    CantidadEntrega,
+    LH_PEDIDO_CANTIDAD_KG,
+    KilosCargoDevolucion,
+    EsLineaRealEntrega,
+    LineaEntregaPadre,
+    FechaFactura,
+    FacturaID,
+    OrdenTransporteID,
+    TipoDeCambioCabecera,
+    TipoDocumentoEntrega,
+    FechaSM,
+    FechaEntrega,
+    FechaNum,
+    PuntoDeExpedicionID,
+    OrganizacionVentasID,
+    OrganizacionVentasInterempresaID,
+    Devolucion,
+    KgsTotalLinea,
+    PorcentajeLinea,
+    CosteCompleto,
+    CosteVariable,
+    ImporteCosteCompleto,
+    ImporteCosteVariable,
+    KgsMesClienteMaterial,
+    KgsMesCliente,
+    Transporte							as TransporteEntrega,
+    TransporteGrupo						as TransporteEntregaGrupo,
+    TransporteSociedad,
+    CosteTTe,
+    OtrasReduccionesManVenta			as OtrasReduccionesManEntrega,
+    OtrasReduccionesAutoVenta			as OtrasReduccionesAutoEntrega,
+    ProntoPagoManVenta					as ProntoPagoManEntrega,
+    ProntoPagoAutoVenta					as ProntoPagoAutoEntrega,
+    ImporteContaLineaVenta				as ImporteContaLineaEntrega,
+    DifPrecioCantidadVenta				as DifPrecioCantidadEntrega,
+    OtrasReduccionesManGrupo,
+    OtrasReduccionesAutoGrupo,
+    ProntoPagoManGrupo,
+    ProntoPagoAutoGrupo,
+    ImporteContaLineaGrupo,
+    DifPrecioCantidadGrupo,
+    OtrasReduccionesMan					as OtrasReduccionesManSociedad,
+    OtrasReduccionesAuto				as OtrasReduccionesAutoSociedad,
+    ProntoPagoMan						as ProntoPagoManSociedad,
+    ProntoPagoAuto						as ProntoPagoAutoSociedad,
+    ImporteContaLinea					as ImporteContaLineaSociedad,
+    DifPrecioCantidad					as DifPrecioCantidadSociedad,
+    MovConta,
+    Atipicos							as AtipicosSociedad,
+    AtipicosGrupo,
+    AtipicosVenta						as AtipicosEntrega,
+    ImporteContaSociedad,
+    ImporteVentaCalculadoSociedad,
+    ImporteContaGrupo,
+    ImporteVentaCalculadoGrupo,
+    ImporteConta						as ImporteContaEntrega,
+    ImporteVentaCalculado				as ImporteVentaCalculadoEntrega,
+    Analisis							as AnalisisSociedad,
+    AnalisisGrupo,
+    AnalisisVenta						as AnalisisEntrega,
+    Calidad								as CalidadSociedad,
+    CalidadGrupo,
+    CalidadVenta						as CalidadEntrega,
+    Penalizaciones						as PenalizacionesSociedad,
+    PenalizacionesGrupo,
+    PenalizacionesVenta					as PenalizacionesEntrega,
+    PrecioUnitario						as PrecioUnitarioEntrega,
+    ImporteVentaBruto					as ImporteVentaBrutoEntrega,
+    PrecioKG							as PrecioKGEntrega,
+    ImporteVentaNeto1					as ImporteVentaNeto1Entrega,
+    ImporteVentaNeto2					as ImporteVentaNeto2Entrega,
+    ImporteVentaNeto3					as ImporteVentaNeto3Entrega,
+    PrecioUnitarioGrupo,
+    ImporteVentaBrutoGrupo,
+    PrecioKGGrupo,
+    ImporteVentaNeto1Grupo,
+    ImporteVentaNeto2Grupo,
+    ImporteVentaNeto3Grupo,
+    PrecioUnitarioSociedad,
+    ImporteVentaBrutoSociedad,
+    PrecioKGSociedad,
+    ImporteVentaNeto1Sociedad,
+    ImporteVentaNeto2Sociedad,
+    ImporteVentaNeto3Sociedad,
+    ClaseDocumTransporte,
+    MonedaGrupo,
+    MonedaSociedad,
+    MonedaVenta																	as MonedaEntrega,
+    MonedaTransporte															as MonedaTransporteEntrega,
+    MonedaTransporteGrupo,
+    MonedaTransporteSociedad,
+     'Fact_Entregas'															as Origen,
+     'Entregas'																	as Origen_Filtro,
+    
+    OrganizacionVentasID&'-'&Text(ClienteID)												as "PK_Clientes",
+
+    
+    OrganizacionVentasID&'-'&Text(ClienteID)	&'-'&Referencia							as "PK_Clientes_Referencia"	,
+
+
+    if(EsCorreccionLinea=1,'Si','No')											as EsCorreccionLinea,
+   	if(TieneCrossCompany=1,'Si','No')											as  TieneCrossCompany,
+    Alt ( ImporteVentaBrutoGrupo, 0 ) - Alt ( TransporteGrupo, 0 )
+    	- Alt ( ImporteCosteVariable, 0 ) + Alt ( OtrasReduccionesManGrupo, 0 )
+        + Alt ( CalidadGrupo, 0 ) + Alt ( DifPrecioCantidadGrupo, 0 ) 
+        + Alt ( PenalizacionesGrupo, 0 ) + Alt ( AnalisisGrupo, 0 )				 as [Margen Entregas],
+    FlagPresupuestoReferencia,
+    FlagPresupuestoReferenciaCanal,
+	FlagVentaReferencia,
+	FlagVentaReferenciaCanal,
+//     PrecioTarifa,
+    FechaInicioTarifa,
+    FechaFinTarifa,
+    TarifaVigente,
+    DestinatarioID,
+    SolicitanteID,
+    OrganizacionVentasID&'-'&DestinatarioID											as "PK_Destinatario",
+    Alt(ImporteVentaBruto, 0) - Alt(AtipicosGrupo, 0) - Alt ( TransporteGrupo, 0 ) as VentaNetaEXW,
+    CosteVariableGrupo
+ FROM [lib://Datos:DataFiles/Fact_Entregas.qvd]
+ (qvd);
+
+
+// LOAD
+//     ClienteID,
+//     SociedadID,
+//     EntregaID,
+//     LineaEntrega,
+//     MandanteID,
+//     Referencia,
+//     CentroID,
+//     LoteID,
+//     UnidadMedidaEntregas,
+//     DocumentoReferenciaID,
+//     ArticuloReferenciaID,
+//     CantidadEntrega,
+//     LH_PEDIDO_CANTIDAD_KG,
+//     KilosCargoDevolucion,
+//     EsLineaRealEntrega,
+//     LineaEntregaPadre,
+//     FechaFactura,
+//     FacturaID,
+//     OrdenTransporteID,
+//     TipoDeCambioCabecera,
+//     TipoDocumentoEntrega,
+//     FechaSM,
+//     FechaEntrega,
+//     FechaNum,
+//     PuntoDeExpedicionID,
+//     OrganizacionVentasID,
+//     OrganizacionVentasInterempresaID,
+//     Devolucion,
+//     KgsTotalLinea,
+//     PorcentajeLinea,
+//     CosteCompleto,
+//     CosteVariable,
+//     ImporteCosteCompleto,
+//     ImporteCosteVariable,
+//     KgsMesClienteMaterial,
+//     KgsMesCliente,
+//     Transporte							as TransporteEntrega,
+//     TransporteGrupo,
+//     TransporteSociedad,
+//     CosteTTe,
+//     OtrasReduccionesManVenta			as OtrasReduccionesManEntrega,
+//     OtrasReduccionesAutoVenta			as OtrasReduccionesAutoEntrega,
+//     ProntoPagoManVenta					as ProntoPagoManEntrega,
+//     ProntoPagoAutoVenta					as ProntoPagoAutoEntrega,
+//     ImporteContaLineaVenta				as ImporteContaLineaEntrega,
+//     DifPrecioCantidadVenta				as DifPrecioCantidadEntrega,
+//     OtrasReduccionesManGrupo,
+//     OtrasReduccionesAutoGrupo,
+//     ProntoPagoManGrupo,
+//     ProntoPagoAutoGrupo,
+//     ImporteContaLineaGrupo,
+//     DifPrecioCantidadGrupo,
+//     OtrasReduccionesMan					as OtrasReduccionesManSociedad,
+//     OtrasReduccionesAuto				as OtrasReduccionesAutoSociedad,
+//     ProntoPagoMan						as ProntoPagoManSociedad,
+//     ProntoPagoAuto						as ProntoPagoAutoSociedad,
+//     ImporteContaLinea					as ImporteContaLineaSociedad,
+//     DifPrecioCantidad					as DifPrecioCantidadSociedad,
+//     MovConta,
+//     Atipicos							as AtipicosSociedad,
+//     AtipicosGrupo,
+//     AtipicosVenta						as AtipicosEntrega,
+//     ImporteContaSociedad,
+//     ImporteVentaCalculadoSociedad,
+//     ImporteContaGrupo,
+//     ImporteVentaCalculadoGrupo,
+//     ImporteConta						as ImporteContaEntrega,
+//     ImporteVentaCalculado				as ImporteVentaCalculadoEntrega,
+//     Analisis							as AnalisisSociedad,
+//     AnalisisGrupo,
+//     AnalisisVenta						as AnalisisEntrega,
+//     Calidad								as CalidadSociedad,
+//     CalidadGrupo,
+//     CalidadVenta						as CalidadEntrega,
+//     Penalizaciones						as PenalizacionesSociedad,
+//     PenalizacionesGrupo,
+//     PenalizacionesVenta					as PenalizacionesEntrega,
+//     PrecioUnitario						as PrecioUnitarioEntrega,
+//     ImporteVentaBruto					as ImporteVentaBrutoEntrega,
+//     PrecioKG							as PrecioKGEntrega,
+//     ImporteVentaNeto1					as ImporteVentaNeto1Entrega,
+//     ImporteVentaNeto2					as ImporteVentaNeto2Entrega,
+//     ImporteVentaNeto3					as ImporteVentaNeto3Entrega,
+//     PrecioUnitarioGrupo,
+//     ImporteVentaBrutoGrupo,
+//     PrecioKGGrupo,
+//     ImporteVentaNeto1Grupo,
+//     ImporteVentaNeto2Grupo,
+//     ImporteVentaNeto3Grupo,
+//     PrecioUnitarioSociedad,
+//     ImporteVentaBrutoSociedad,
+//     PrecioKGSociedad,
+//     ImporteVentaNeto1Sociedad,
+//     ImporteVentaNeto2Sociedad,
+//     ImporteVentaNeto3Sociedad,
+//     ClaseDocumTransporte,
+//     MonedaGrupo,
+//     MonedaSociedad,
+//     MonedaVenta							as MonedaEntrega,
+//     MonedaTransporte					as MonedaTransporteEntrega,
+//     MonedaTransporteGrupo,
+//     MonedaTransporteSociedad,
+//      'Fact_Entregas'												as Origen,
+//     OrganizacionVentasID&'-'&ClienteID							as "PK_Clientes",
+//     OrganizacionVentasID&'-'&ClienteID&'-'&Referencia			as "PK_Clientes_Referencia"	
+// FROM [lib://Datos:DataFiles/Fact_Entregas.qvd]
+// (qvd);
+
+
+
+
+
+
+///$tab Entregas CrossCompany
+Concatenate(Hechos)
+LOAD
+    Text(ClienteID)	 as ClienteID,
+    SociedadID,
+    EntregaID,
+    LineaEntrega,
+//     MandanteID,
+    Referencia,
+    If( MatchRegEx( Referencia, '.*[A-Za-z].*'), 1, 0)														as [FlagReferenciaTexto],    
+    CentroID,
+    LoteID,
+    UnidadMedidaEntregas,
+    DocumentoReferenciaID,
+    ArticuloReferenciaID,
+    CantidadEntrega,
+    LH_PEDIDO_CANTIDAD_KG,
+    KilosCargoDevolucion,
+    EsLineaRealEntrega,
+    LineaEntregaPadre,
+    FechaFactura,
+    FacturaID,
+    OrdenTransporteID,
+    TipoDeCambioCabecera,
+    TipoDocumentoEntrega,
+    FechaSM,
+    FechaEntrega,
+    FechaNum,
+    PuntoDeExpedicionID,
+    OrganizacionVentasID,
+    OrganizacionVentasInterempresaID,
+    Devolucion,
+    KgsTotalLinea,
+    PorcentajeLinea,
+    CosteCompleto,
+    CosteVariable,
+    ImporteCosteCompleto,
+    ImporteCosteVariable,
+    KgsMesClienteMaterial,
+    KgsMesCliente,
+    Transporte							as TransporteEntrega,
+    TransporteGrupo						as TransporteEntregaGrupo,
+    TransporteSociedad,
+    CosteTTe,
+    OtrasReduccionesManVenta			as OtrasReduccionesManEntrega,
+    OtrasReduccionesAutoVenta			as OtrasReduccionesAutoEntrega,
+    ProntoPagoManVenta					as ProntoPagoManEntrega,
+    ProntoPagoAutoVenta					as ProntoPagoAutoEntrega,
+    ImporteContaLineaVenta				as ImporteContaLineaEntrega,
+    DifPrecioCantidadVenta				as DifPrecioCantidadEntrega,
+    OtrasReduccionesManGrupo,
+    OtrasReduccionesAutoGrupo,
+    ProntoPagoManGrupo,
+    ProntoPagoAutoGrupo,
+    ImporteContaLineaGrupo,
+    DifPrecioCantidadGrupo,
+    OtrasReduccionesMan					as OtrasReduccionesManSociedad,
+    OtrasReduccionesAuto				as OtrasReduccionesAutoSociedad,
+    ProntoPagoMan						as ProntoPagoManSociedad,
+    ProntoPagoAuto						as ProntoPagoAutoSociedad,
+    ImporteContaLinea					as ImporteContaLineaSociedad,
+    DifPrecioCantidad					as DifPrecioCantidadSociedad,
+    MovConta,
+    Atipicos							as AtipicosSociedad,
+    AtipicosGrupo,
+    AtipicosVenta						as AtipicosEntrega,
+    ImporteContaSociedad,
+    ImporteVentaCalculadoSociedad,
+    ImporteContaGrupo,
+    ImporteVentaCalculadoGrupo,
+    ImporteConta						as ImporteContaEntrega,
+    ImporteVentaCalculado				as ImporteVentaCalculadoEntrega,
+    Analisis							as AnalisisSociedad,
+    AnalisisGrupo,
+    AnalisisVenta						as AnalisisEntrega,
+    Calidad								as CalidadSociedad,
+    CalidadGrupo,
+    CalidadVenta						as CalidadEntrega,
+    Penalizaciones						as PenalizacionesSociedad,
+    PenalizacionesGrupo,
+    PenalizacionesVenta					as PenalizacionesEntrega,
+    PrecioUnitario						as PrecioUnitarioEntrega,
+    ImporteVentaBruto					as ImporteVentaBrutoEntrega,
+    PrecioKG							as PrecioKGEntrega,
+    ImporteVentaNeto1					as ImporteVentaNeto1Entrega,
+    ImporteVentaNeto2					as ImporteVentaNeto2Entrega,
+    ImporteVentaNeto3					as ImporteVentaNeto3Entrega,
+    PrecioUnitarioGrupo,
+    ImporteVentaBrutoGrupo,
+    PrecioKGGrupo,
+    ImporteVentaNeto1Grupo,
+    ImporteVentaNeto2Grupo,
+    ImporteVentaNeto3Grupo,
+    PrecioUnitarioSociedad,
+    ImporteVentaBrutoSociedad,
+    PrecioKGSociedad,
+    ImporteVentaNeto1Sociedad,
+    ImporteVentaNeto2Sociedad,
+    ImporteVentaNeto3Sociedad,
+    ClaseDocumTransporte,
+    MonedaGrupo,
+    MonedaSociedad,
+    MonedaVenta													as MonedaEntrega,
+    MonedaTransporte											as MonedaTransporteEntrega,
+    MonedaTransporteGrupo,
+    MonedaTransporteSociedad,
+    'Fact_Entregas_CrossCompany' 								as Origen,
+    'Entregas'													as Origen_Filtro,
+	OrganizacionVentasID&'-'&Text(ClienteID)								as "PK_Clientes",
+
+    OrganizacionVentasID&'-'&Text(ClienteID)	&'-'&Referencia			as "PK_Clientes_Referencia"	,
+
+    if(EsCorreccionLinea=1,'Si','No')							as EsCorreccionLinea,
+   	if(TieneCrossCompany=1,'Si','No')											as  TieneCrossCompany,
+    Alt ( ImporteVentaBrutoGrupo, 0 ) - Alt ( TransporteGrupo, 0 )
+    	- Alt ( ImporteCosteVariable, 0 ) + Alt ( OtrasReduccionesManGrupo, 0 )
+        + Alt ( CalidadGrupo, 0 ) + Alt ( DifPrecioCantidadGrupo, 0 ) 
+        + Alt ( PenalizacionesGrupo, 0 ) + Alt ( AnalisisGrupo, 0 )				 as [Margen Entregas],
+    FlagPresupuestoReferencia,
+    FlagPresupuestoReferenciaCanal,
+	FlagVentaReferencia,
+	FlagVentaReferenciaCanal,
+//     PrecioTarifa,
+    FechaInicioTarifa,
+    FechaFinTarifa,
+    TarifaVigente,
+    DestinatarioID,
+    SolicitanteID,
+    OrganizacionVentasID&'-'&DestinatarioID											as "PK_Destinatario",
+    Alt(ImporteVentaBruto, 0) - Alt(AtipicosGrupo, 0) - Alt ( TransporteGrupo, 0 ) as VentaNetaEXW,
+    CosteVariableGrupo
+
+
+ FROM [lib://Datos:DataFiles/Fact_Entregas_CrossCompany.qvd]
+ (qvd);
+
+
+
+/*LOAD
+    ClienteID,
+    SociedadID,
+    EntregaID,
+    LineaEntrega,
+    MandanteID,
+    Referencia,
+    CentroID,
+    LoteID,
+    UnidadMedidaEntregas,
+    DocumentoReferenciaID,
+    ArticuloReferenciaID,
+    CantidadEntrega				as CantidadEntregaCC,
+    LH_PEDIDO_CANTIDAD_KG		as LH_PEDIDO_CANTIDAD_KGCC,
+    KilosCargoDevolucion,
+    EsLineaRealEntrega,
+    LineaEntregaPadre,
+    FechaFactura,
+    FacturaID,
+    OrdenTransporteID,
+    TipoDeCambioCabecera,
+    TipoDocumentoEntrega,
+    FechaSM,
+    FechaEntrega,
+    FechaNum,
+    PuntoDeExpedicionID,
+    OrganizacionVentasID,
+    OrganizacionVentasInterempresaID,
+    Devolucion,
+    KgsTotalLinea						as KgsTotalLineaCC,
+    PorcentajeLinea						as PorcentajeLineaCC,
+    CosteCompleto						as CosteCompletoCC,
+    CosteVariable						as CosteVariableCC,
+    ImporteCosteCompleto				as ImporteCosteCompletoCC,
+    ImporteCosteVariable				as ImporteCosteVariableCC,
+    KgsMesClienteMaterial				as KgsMesClienteMaterialCC,
+    KgsMesCliente						as KgsMesClienteCC,
+    Transporte							as TransporteEntregaCC,
+    TransporteGrupo						as TransporteGrupoCC,
+    TransporteSociedad					as TransporteSociedadCC,
+    CosteTTe							as CosteTTeCC,
+    OtrasReduccionesManVenta			as OtrasReduccionesManEntregaCC,
+    OtrasReduccionesAutoVenta			as OtrasReduccionesAutoEntregaCC,
+    ProntoPagoManVenta					as ProntoPagoManEntregaCC,
+    ProntoPagoAutoVenta					as ProntoPagoAutoEntregaCC,
+    ImporteContaLineaVenta				as ImporteContaLineaEntregaCC,
+    DifPrecioCantidadVenta				as DifPrecioCantidadEntregaCC,
+    OtrasReduccionesManGrupo			as OtrasReduccionesManGrupoCC,
+    OtrasReduccionesAutoGrupo			as OtrasReduccionesAutoGrupoCC,
+    ProntoPagoManGrupo					as ProntoPagoManGrupoCC,
+    ProntoPagoAutoGrupo					as ProntoPagoAutoGrupoCC,
+    ImporteContaLineaGrupo				as ImporteContaLineaGrupoCC,
+    DifPrecioCantidadGrupo				as DifPrecioCantidadGrupoCC,
+    OtrasReduccionesMan					as OtrasReduccionesManSociedadCC,
+    OtrasReduccionesAuto				as OtrasReduccionesAutoSociedadCC,
+    ProntoPagoMan						as ProntoPagoManSociedadCC,
+    ProntoPagoAuto						as ProntoPagoAutoSociedadCC,
+    ImporteContaLinea					as ImporteContaLineaSociedadCC,
+    DifPrecioCantidad					as DifPrecioCantidadSociedadCC,
+    MovConta,
+    Atipicos							as AtipicosSociedadCC,
+    AtipicosGrupo						as AtipicosGrupoCC,
+    AtipicosVenta						as AtipicosEntregaCC,
+    ImporteContaSociedad				as ImporteContaSociedadCC,
+    ImporteVentaCalculadoSociedad		as ImporteVentaCalculadoSociedadCC,
+    ImporteContaGrupo					as ImporteContaGrupoCC,
+    ImporteVentaCalculadoGrupo			as ImporteVentaCalculadoGrupoCC,
+    ImporteConta						as ImporteContaEntregaCC,
+    ImporteVentaCalculado				as ImporteVentaCalculadoEntregaCC,
+    Analisis							as AnalisisSociedadCC,
+    AnalisisGrupo						as AnalisisGrupoCC,
+    AnalisisVenta						as AnalisisEntregaCC,
+    Calidad								as CalidadSociedadCC,
+    CalidadGrupo						as CalidadGrupoCC,
+    CalidadVenta						as CalidadEntregaCC,
+    Penalizaciones						as PenalizacionesSociedadCC,
+    PenalizacionesGrupo					as PenalizacionesGrupoCC,
+    PenalizacionesVenta					as PenalizacionesEntregaCC,
+    PrecioUnitario						as PrecioUnitarioEntregaCC,
+    ImporteVentaBruto					as ImporteVentaBrutoEntregaCC,
+    PrecioKG							as PrecioKGEntregaCC,
+    ImporteVentaNeto1					as ImporteVentaNeto1EntregaCC,
+    ImporteVentaNeto2					as ImporteVentaNeto2EntregaCC,
+    ImporteVentaNeto3					as ImporteVentaNeto3EntregaCC,
+    PrecioUnitarioGrupo					as PrecioUnitarioGrupoCC,
+    ImporteVentaBrutoGrupo				as ImporteVentaBrutoGrupoCC,
+    PrecioKGGrupo						as PrecioKGGrupoCC,
+    ImporteVentaNeto1Grupo				as ImporteVentaNeto1GrupoCC,
+    ImporteVentaNeto2Grupo				as ImporteVentaNeto2GrupoCC,
+    ImporteVentaNeto3Grupo				as ImporteVentaNeto3GrupoCC,
+    PrecioUnitarioSociedad				as PrecioUnitarioSociedadCC,
+    ImporteVentaBrutoSociedad			as ImporteVentaBrutoSociedadCC,
+    PrecioKGSociedad					as PrecioKGSociedadCC,
+    ImporteVentaNeto1Sociedad			as ImporteVentaNeto1SociedadCC,
+    ImporteVentaNeto2Sociedad			as ImporteVentaNeto2SociedadCC,
+    ImporteVentaNeto3Sociedad			as ImporteVentaNeto3SociedadCC,
+    ClaseDocumTransporte				as ClaseDocumTransporteCC,
+    MonedaGrupo,
+    MonedaSociedad		,
+    MonedaVenta							as MonedaEntrega,
+    MonedaTransporte					as MonedaTransporteEntrega,
+    MonedaTransporteGrupo				,
+    MonedaTransporteSociedad			,
+    'Entregas CC' 												as Origen,
+    OrganizacionVentasID&'-'&ClienteID							as "PK_Clientes",
+    OrganizacionVentasID&'-'&ClienteID&'-'&Referencia			as "PK_Clientes_Referencia" 
+FROM [lib://Datos:DataFiles/Fact_Entregas_CrossCompany.qvd]
+(qvd);
+*/
+
+
+
+///$tab Entregas ZTER
+Concatenate(Hechos)
+LOAD
+    Text(ClienteID)	 as ClienteID,
+    SociedadID,
+    EntregaID,
+    LineaEntrega,
+//     MandanteID,
+    Referencia,
+    If( MatchRegEx( Referencia, '.*[A-Za-z].*'), 1, 0)														as [FlagReferenciaTexto],
+    CentroID,
+    LoteID,
+    UnidadMedidaEntregas,
+    DocumentoReferenciaID,
+    ArticuloReferenciaID,
+    CantidadEntrega,
+    LH_PEDIDO_CANTIDAD_KG,
+    KilosCargoDevolucion,
+    EsLineaRealEntrega,
+    LineaEntregaPadre,
+    FechaFactura,
+    FacturaID,
+    OrdenTransporteID,
+    TipoDeCambioCabecera,
+    TipoDocumentoEntrega,
+    FechaSM,
+    FechaEntrega,
+    FechaNum,
+    PuntoDeExpedicionID,
+    OrganizacionVentasID,
+    OrganizacionVentasInterempresaID,
+    Devolucion,
+    KgsTotalLinea,
+    PorcentajeLinea,
+    CosteCompleto,
+    CosteVariable,
+    ImporteCosteCompleto,
+    ImporteCosteVariable,
+    KgsMesClienteMaterial,
+    KgsMesCliente,
+    Transporte							as TransporteEntrega,
+    TransporteGrupo						as TransporteEntregaGrupo,
+    TransporteSociedad,
+    CosteTTe,
+    OtrasReduccionesManVenta			as OtrasReduccionesManEntrega,
+    OtrasReduccionesAutoVenta			as OtrasReduccionesAutoEntrega,
+    ProntoPagoManVenta					as ProntoPagoManEntrega,
+    ProntoPagoAutoVenta					as ProntoPagoAutoEntrega,
+    ImporteContaLineaVenta				as ImporteContaLineaEntrega,
+    DifPrecioCantidadVenta				as DifPrecioCantidadEntrega,
+    OtrasReduccionesManGrupo,
+    OtrasReduccionesAutoGrupo,
+    ProntoPagoManGrupo,
+    ProntoPagoAutoGrupo,
+    ImporteContaLineaGrupo,
+    DifPrecioCantidadGrupo,
+    OtrasReduccionesMan					as OtrasReduccionesManSociedad,
+    OtrasReduccionesAuto				as OtrasReduccionesAutoSociedad,
+    ProntoPagoMan						as ProntoPagoManSociedad,
+    ProntoPagoAuto						as ProntoPagoAutoSociedad,
+    ImporteContaLinea					as ImporteContaLineaSociedad,
+    DifPrecioCantidad					as DifPrecioCantidadSociedad,
+    MovConta,
+    Atipicos							as AtipicosSociedad,
+    AtipicosGrupo,
+    AtipicosVenta						as AtipicosEntrega,
+    ImporteContaSociedad,
+    ImporteVentaCalculadoSociedad,
+    ImporteContaGrupo,
+    ImporteVentaCalculadoGrupo,
+    ImporteConta						as ImporteContaEntrega,
+    ImporteVentaCalculado				as ImporteVentaCalculadoEntrega,
+    Analisis							as AnalisisSociedad,
+    AnalisisGrupo,
+    AnalisisVenta						as AnalisisEntrega,
+    Calidad								as CalidadSociedad,
+    CalidadGrupo,
+    CalidadVenta						as CalidadEntrega,
+    Penalizaciones						as PenalizacionesSociedad,
+    PenalizacionesGrupo,
+    PenalizacionesVenta					as PenalizacionesEntrega,
+    PrecioUnitario						as PrecioUnitarioEntrega,
+    ImporteVentaBruto					as ImporteVentaBrutoEntrega,
+    PrecioKG							as PrecioKGEntrega,
+    ImporteVentaNeto1					as ImporteVentaNeto1Entrega,
+    ImporteVentaNeto2					as ImporteVentaNeto2Entrega,
+    ImporteVentaNeto3					as ImporteVentaNeto3Entrega,
+    PrecioUnitarioGrupo,
+    ImporteVentaBrutoGrupo,
+    PrecioKGGrupo,
+    ImporteVentaNeto1Grupo,
+    ImporteVentaNeto2Grupo,
+    ImporteVentaNeto3Grupo,
+    PrecioUnitarioSociedad,
+    ImporteVentaBrutoSociedad,
+    PrecioKGSociedad,
+    ImporteVentaNeto1Sociedad,
+    ImporteVentaNeto2Sociedad,
+    ImporteVentaNeto3Sociedad,
+    ClaseDocumTransporte,
+    MonedaGrupo,
+    MonedaSociedad,
+    MonedaVenta							as MonedaEntrega,
+    MonedaTransporte					as MonedaTransporteEntrega,
+    MonedaTransporteGrupo,
+    MonedaTransporteSociedad,
+    'Fact_Entregas_ZTER' 											as Origen,
+    'Entregas'												as Origen_Filtro,
+    OrganizacionVentasID&'-'&Text(ClienteID)								as "PK_Clientes",
+    OrganizacionVentasID&'-'&Text(ClienteID)	&'-'&Referencia			as "PK_Clientes_Referencia",
+    if(EsCorreccionLinea=1,'Si','No')							as EsCorreccionLinea,
+   	if(TieneCrossCompany=1,'Si','No')							as TieneCrossCompany,
+    Alt ( ImporteVentaBrutoGrupo, 0 ) - Alt ( TransporteGrupo, 0 )
+    	- Alt ( ImporteCosteVariable, 0 ) + Alt ( OtrasReduccionesManGrupo, 0 )
+        + Alt ( CalidadGrupo, 0 ) + Alt ( DifPrecioCantidadGrupo, 0 ) 
+        + Alt ( PenalizacionesGrupo, 0 ) + Alt ( AnalisisGrupo, 0 )				 as [Margen Entregas],
+    FlagPresupuestoReferencia,
+    FlagPresupuestoReferenciaCanal,
+	FlagVentaReferencia,
+	FlagVentaReferenciaCanal,
+//     PrecioTarifa,
+    FechaInicioTarifa,
+    FechaFinTarifa,
+    TarifaVigente,
+    DestinatarioID,
+    SolicitanteID,
+    OrganizacionVentasID&'-'&DestinatarioID											as "PK_Destinatario",
+    Alt(ImporteVentaBruto, 0) - Alt(AtipicosGrupo, 0) - Alt ( TransporteGrupo, 0 ) as VentaNetaEXW,
+    CosteVariableGrupo
+
+FROM [lib://Datos:DataFiles/Fact_Entregas_ZTER.qvd]
+(qvd);
+
+
+
+/*LOAD
+    ClienteID,
+    EntregaID,
+    LineaEntrega,
+    MandanteID,
+    Referencia,
+    CentroID,
+    LoteID,
+    ClaseDocumTransporte,
+    UnidadMedidaEntregas,
+    DocumentoReferenciaID,
+    ArticuloReferenciaID,
+	CantidadEntrega						as CantidadEntregaZT,					
+    LH_PEDIDO_CANTIDAD_KG,
+    KilosCargoDevolucion				as KilosCargoDevolucionZT,
+    EsLineaRealEntrega,
+    LineaEntregaPadre,
+    FechaFactura,
+    FacturaID,
+    OrdenTransporteID,
+    TipoDeCambioCabecera,
+    TipoDocumentoEntrega,
+    FechaSM,
+    FechaEntrega,
+    FechaNum,
+    PuntoDeExpedicionID,
+    OrganizacionVentasID,
+    OrganizacionVentasInterempresaID,
+    Devolucion,
+    KgsTotalLinea						as KgsTotalLineaZT,
+    PorcentajeLinea						as PorcentajeLineaZT,
+    CosteCompleto						as CosteCompletoZT,
+    CosteVariable						as CosteVariableZT,
+    ImporteCosteCompleto				as ImporteCosteCompletoZT,
+    ImporteCosteVariable				as ImporteCosteVariableZT,
+    KgsMesClienteMaterial				as KgsMesClienteMaterialZT,
+    KgsMesCliente						as KgsMesClienteZT,
+    Transporte							as TransporteZT,
+    CosteTTe							as CosteTTeZT,
+    OtrasReduccionesMan 				as OtrasReduccionesManZT,
+    OtrasReduccionesAuto				as OtrasReduccionesAutoZT,
+    ProntoPagoMan 						as ProntoPagoManZT,
+    ProntoPagoAuto						as ProntoPagoAutoZT,
+    ImporteContaLinea					as ImporteContaLineaZT,
+    DifPrecioCantidad					as DifPrecioCantidadZT,
+    OtrasReduccionesManEUR				as OtrasReduccionesManEURZT,
+    OtrasReduccionesAutoEUR				as OtrasReduccionesAutoEURZT,
+    ProntoPagoManEUR					as ProntoPagoManEURZT,
+    ProntoPagoAutoEUR					as ProntoPagoAutoEURZT,
+    ImporteContaLineaEUR				as ImporteContaLineaEURZT,
+    DifPrecioCantidadEUR				as DifPrecioCantidadEURZT,
+    MovConta,	
+    Atipicos 							as AtipicosZT,
+    ImporteConta 						as ImporteContaZT,
+    ImporteVentaCalculado 				as ImporteVentaCalculadoZT, 
+    ImporteContaEUR 					as ImporteContaEURZT,
+    ImporteVentaCalculadoEUR 			as ImporteVentaCalculadoEURZT,
+    Analisis,	
+    Calidad,	
+    Penalizaciones,	
+    ImporteVentaBruto					as ImporteVentaBrutoZT,
+    ImporteVentaBrutoEUR				as ImporteVentaBrutoEURZT,
+    PrecioUnitario						as PrecioUnitarioZT,
+    PrecioUnitarioEUR					as PrecioUnitarioEURZT,
+    PrecioKG							as PrecioKGZT,
+    PrecioKGEUR							as PrecioKGEURZT,
+    ImporteVentaNeto1					as ImporteVentaNeto1ZT,
+    ImporteVentaNeto2					as ImporteVentaNeto2ZT,
+    ImporteVentaNeto3					as ImporteVentaNeto3ZT,
+    'Entregas ZTER' 											as Origen,
+    OrganizacionVentasID&'-'&ClienteID							as "PK_Clientes",
+    OrganizacionVentasID&'-'&ClienteID&'-'&Referencia			as "PK_Clientes_Referencia"  
+    */
+
+///$tab Dispo
+Dispo:
+LOAD
+//     Referencia									as PK_ReferenciaSAP,
+	Referencia,
+    TipoPlanificacionID							as Dispo
+   
+FROM [lib://Datos:DataFiles/Dim_CentroArticulo.qvd]
+(qvd);
+///$tab Factic Predicciones
+Concatenate(Hechos)
+LOAD
+    Referencia,
+    referencia_cliente,
+    org_ventas & '-' & referencia_cliente as "PK_Clientes",
+    prediccion,
+    prediccion_inicial,
+    fecha_prediccion,
+     NUM(fecha_prediccion) as FechaNum,
+    fecha_creacion,
+    mensual,
+    peso_mes,
+    org_ventas,
+    org_ventas as SociedadID
+FROM [lib://Datos:DataFiles/Fact_Predicciones.qvd]
+(qvd);
+
+
+///$tab CostesOT
+//============================================================================================================================================
+// Aplicación:          		CN - Compras
+// Autor:               		Mercanza
+// Fecha Creación:      		12-11-2024
+// Objetivo de la App:  		Aplicación que genera la logica de compras
+// Objetivo de la pestaña:   	Hechos Costes OT
+//============================================================================================================================================
+
+Fact_CostesOT:
+LOAD
+    OrdenTransporteID,
+    NumeroLineaOTID,
+    ClaseCoste,
+    SubtipoCoste,
+    CosteOTCalculo,
+    MonedaCalculo,
+    CosteOTRate,
+    MonedaRate,
+    CosteOTLinea,
+    MonedaLinea
+FROM [lib://Datos:DataFiles/Fact_CostesOT.qvd]
+(qvd);
+
+
+///$tab KilosServidosContrato
+KilosServidorContrato:
+LOAD
+	ContratoVentasID & '..'& LineaContratoVentas AS PK_ContratoLinea,
+    SUM(LH_PEDIDO_CANTIDAD_KG) AS KilosServidos
+Resident Hechos
+WHERE ContratoVentasID>0
+GROUP BY ContratoVentasID,LineaContratoVentas;
+    
+///$tab DiaFacturado
+//============================================================================================================================================
+// Aplicación:          		CN - Comercial
+// Autor:               		Elva Salinas
+// Fecha Creación:      		29-09-2025
+// Objetivo de la App:  		
+// Objetivo de la pestaña:   	Dim Dia Facturado
+//============================================================================================================================================
+
+Dim_DiaFacturado:
+LOAD
+   	Num(Floor(Fecha))  as FechaNumFacturado,
+    Alt( Num#(Trim(Facturado)), 0 ) as DiaFacturado
+FROM [lib://Datos:DataFiles/Dim_DiaFacturado.qvd]
+(qvd);
+
+
+///$tab Ajustes Hechos
+// // Metemos en la tabla de hechos valores para todos los días que faltan del calendario para cada comercial
+
+// NoConcatenate
+// FechaHechos:
+// Load distinct
+//     FechaNum		as ExisteFechaNumVentas
+// Resident
+// 	Hechos;
+    
+    
+    
+// Datos_a_cero:
+// Load
+// 	FechaNum
+// Resident
+// 	Calendario
+// Where not Exists ( ExisteFechaNumVentas, FechaNum );
+
+// Drop Table FechaHechos;
+
+
+// Left Join ( Datos_a_cero )
+// Load distinct
+//     PK_Clientes
+// Resident
+// 	Hechos;
+    
+    
+// Concatenate ( Hechos )
+// Load
+// 	FechaNum,
+//     PK_Clientes,
+//     0										as fila_cero
+// Resident
+// 	Datos_a_cero;
+    
+// Drop Table Datos_a_cero;
+    
+
+///$tab Clientes
+//============================================================================================================================================
+// Aplicación:          		CN - Compras
+// Autor:               		Mercanza
+// Fecha Creación:      		12-11-2024
+// Objetivo de la App:  		Aplicación que genera la logica de compras
+// Objetivo de la pestaña:   	Maestro Clientes
+//============================================================================================================================================
+
+Dim_Clientes:
+Load
+	*,
+    If ( Grupo_Cliente_auxiliar <> 'No encontrado',
+    	Grupo_Cliente_auxiliar,
+        ClienteNombre )												as [Grupo Cliente],
+        PK_Clientes													as PK_Clientes_filtro
+;
+LOAD
+   	OrganizacionVentasID&'-'&Text(ClienteID)									as "PK_Clientes",
+    OrganizacionVentasID&'-'&Text(ClienteID)									as "PK_Clientes_Propiedades",
+    OrganizacionVentasID&'-'&GrupoID								as "PK_Grupo",
+    GrupoCanalID													as GrupoCanalID,
+	PaisID															as PaisID, 
+    ClienteRegionID													as RegionID, 
+    PaisID&'-'&ClienteRegionID										as PaisRegionID,
+    ClienteNombre													as ClienteNombre, 
+	ClienteCodigoPostal												as ClienteCodigoPostal, 
+	AtencionClienteID												as AtencionClienteID, 
+	AtencionCliente													as AtencionCliente, 
+	ComercialID														as ComercialID,	 
+	Comercial														as Comercial, 
+	Inactivo														as Inactivo,
+    if(Inactivo=0,'Si','No')										as VigenteCliente,
+    OrganizacionVentasID											as OrganizacionVentasClientesID,
+    Text(ClienteID)														as ClienteClientesID,
+    GrupoID															as GrupoIDClientes,
+    OrganizacionVentasID&'-'&GrupoID&'-'&Text(ClienteID)						as PK_GrupoCliente,
+    GrupoCanalID&'-'&PaisID											as PK_CanalPais,
+    INCO1															as Incoterm,
+    ClienteNIF,
+    ClienteCalle													as ClienteDireccion,
+    CondicionPagoID													as CondicionPagoID,
+    CondicionPago													as CondicionPago,
+
+    NumIdentificacionFiscal											as NIF,
+    ApplyMap ( 'mGrupo', GrupoID, 'No encontrado' )					as Grupo_Cliente_auxiliar,
+    ClientePoblacion												as Ciudad,
+    ClienteTelefono,
+    LimiteCredito
+    
+FROM [lib://Datos:DataFiles/Dim_Clientes.qvd]
+(qvd);
+
+
+Concatenate ( Dim_Clientes )
+Load distinct
+	PK_Clientes,
+    1					as ClienteSinMaestro
+Resident Hechos
+Where not Exists ( PK_Clientes_filtro, PK_Clientes );
+
+
+Drop Field Grupo_Cliente_auxiliar;
+
+///$tab Sección acceso
+// Usuarios:
+// LOAD
+//     Correo,
+//     SociedadID,
+//     Comerciales,
+//     ClienteID,
+//     CanalPaisID,
+//     "ACCESS"
+// From 
+// 	[lib://Desarrollo:Sharepoint_COMPARTIRDATALAKE/Documentos compartidos/COMPARTIR/Seccion_Acceso_QlikCloud.xlsx] 
+//     (ooxml, embedded labels, table is [Comercial new]);
+    
+    
+// Concatenate ( Usuarios )
+// Load
+// 	*
+// Inline [
+// 	Correo, SociedadID, Comerciales, ClienteID, CanalPaisID, ACCESS
+//     qliksense@congeladosnavarra.onmicrosoft.com, *, *, , , ADMIN
+// ];
+
+
+
+// // Usuarios que tienen * en sociedad ven todo
+// NoConcatenate   
+// data_usuarios:
+// Load distinct
+//     Correo,
+//     "ACCESS",
+//     '*'					as PK_Clientes
+// Resident
+// 	Usuarios
+// Where
+// 	SociedadID = '*';
+
+
+// // Left Join ( data_usuarios )
+// // Load distinct
+// //    	PK_Clientes								as "PK_Clientes"
+// // Resident
+// // 	Dim_Clientes;
+    
+  
+    
+
+// // Usuarios que tienen sociedad informada y * en comerciales, ven todo para esa sociedad
+// NoConcatenate
+// data_usuarios_sociedad:
+// LOAD
+//     Correo,
+//     Text ( SociedadID )													as SociedadID,
+//     Comerciales,
+//     ACCESS
+// Resident
+// 	Usuarios
+// Where
+// 	SociedadID <> '*' and Comerciales = '*';
+    
+    
+// Left Join ( data_usuarios_sociedad )
+// Load distinct
+// 	SubField ( PK_Clientes, '-', 1 )												as SociedadID,
+//    	PK_Clientes																		as "PK_Clientes"
+// Resident
+// 	Dim_Clientes;
+
+
+// Concatenate ( data_usuarios )
+// Load
+// 	Correo,
+//     PK_Clientes,
+//     "ACCESS"
+// Resident
+// 	data_usuarios_sociedad;
+    
+    
+// Drop Table data_usuarios_sociedad;
+
+
+// // Usuarios que tienen los comerciales informados
+
+// NoConcatenate
+// data_usuarios_comercial:
+// LOAD
+//     Correo,
+//     Text ( SociedadID )													as SociedadID,
+//     Replace ( SubField ( Comerciales, ';' ), ' ', '' )					as Comerciales,
+//     ACCESS
+// Resident
+// 	Usuarios
+// Where
+// 	not Comerciales = '*';
+    
+    
+
+// Left Join ( data_usuarios_comercial )
+// Load
+//    	PK_Clientes								as "PK_Clientes",
+//     	ComercialID													as Comerciales,	
+// 	SubField ( PK_Clientes, '-', 1 )												as SociedadID
+// Resident
+// 	Dim_Clientes;
+
+// Concatenate ( data_usuarios )
+// Load
+// 	Correo,
+//     PK_Clientes,
+//     ACCESS
+// Resident
+// 	data_usuarios_comercial;
+    
+ 
+// Drop Table data_usuarios_comercial;
+
+
+// // Usuarios que tienen informado el cliente, se añaden esos clients para esa sociedad
+// Concatenate ( data_usuarios )
+// Load distinct
+// 	Correo,
+//     SociedadID&'-'&ClienteID									as "PK_Clientes",
+//     "ACCESS"
+// ;
+// Load distinct
+//     Correo,
+//     Text ( SociedadID )											as SociedadID,
+//     Replace ( SubField ( Comerciales, ';' ), ' ', '' )			as Comerciales,
+//     Text ( Replace ( SubField ( ClienteID, ';' ), ' ', '' ) )	as ClienteID,
+//     ACCESS
+// Resident
+// 	Usuarios
+// Where
+// 	not ( isNull ( ClienteID ) or Trim ( ClienteID ) = '' );
+    
+    
+    
+// // Usuarios que tienen * en sociedad ven todo
+// NoConcatenate   
+// data_usuarios_paiscanal:
+// Load distinct
+//     Correo,
+//     "ACCESS",
+//     Text ( SociedadID )										as SociedadID,
+//     Trim ( SubField ( CanalPaisID, ';' ) )		as CanalPaisID
+// Resident
+// 	Usuarios
+// Where
+// 	 Len ( CanalPaisID ) > 0;
+
+
+// Left Join ( data_usuarios_paiscanal )
+// LOAD
+//     GrupoCanalID & '-' & PaisID										as PK_CanalPais,
+//     if(Match(CanalPais,'Transportistas', 'Proveedores', 'Camaras'),
+//     'Otros', CanalPais)												as CanalPaisID
+// FROM [lib://Datos:DataFiles/Dim_CanalPais.qvd] (qvd)
+// wHERE IdiomaID = 'S';
+
+
+// Left Join ( data_usuarios_paiscanal )
+// Load distinct
+//    	PK_Clientes								as "PK_Clientes",
+//     GrupoCanalID&'-'&PaisID											as PK_CanalPais,
+//     SubField ( PK_Clientes, '-', 1 )												as SociedadID
+// Resident
+// 	Dim_Clientes;
+    
+    
+
+// Concatenate ( data_usuarios )
+// Load distinct
+// 	Correo,
+//     "PK_Clientes",
+//     "ACCESS"
+// Resident
+// 	data_usuarios_paiscanal;
+    
+    
+// Drop Table data_usuarios_paiscanal;
+    
+
+// Drop Table Usuarios;   
+
+
+// Section Access;
+
+// Seccion_Acceso:
+// Load distinct
+// 	ACCESS,
+// 	upper ( Correo ) 					as USER.EMAIL,	
+//     "PK_Clientes"
+// Resident data_usuarios;
+
+
+// Section Application;
+
+
+// Drop Table data_usuarios;
+
+///$tab Sección Acceso Informes
+TempUsers:
+Replace LOAD
+    "Name" AS [DL_DISTRIBUTION_RECIPIENT_NAME],
+    "Email" AS [DL_DISTRIBUTION_EMAIL],
+    SubField([Filters],',') AS [DL_DISTRIBUTION_FILTERS],
+    SubField([Groups],',') AS [DL_DISTRIBUTION_GROUP_NAMES]
+FROM [lib://Desarrollo:Sharepoint_COMPARTIRDATALAKE/Documentos compartidos/INFORMES/Qlik SaaS - Informes CdM_Comercial - Destinatarios.xlsx]
+(ooxml, embedded labels, table is DL_DISTRIBUTION_SVC_USERS_QCS);
+
+TempGroups:
+  REPLACE LOAD
+      *
+    FROM [lib://Desarrollo:Sharepoint_COMPARTIRDATALAKE/Documentos compartidos/INFORMES/Qlik SaaS - Informes CdM_Comercial - Destinatarios.xlsx]
+    (ooxml, embedded labels, table is DL_DISTRIBUTION_SVC_GROUPS_QCS);
+
+let vEnabledFieldNo = FieldNumber('Enabled', 'TempGroups');
+
+if (vEnabledFieldNo > 0) then
+    DL_DISTRIBUTION_SVC_GROUPS_QCS:
+    REPLACE LOAD
+        "Name" AS [DL_DISTRIBUTION_GROUP_NAMES],
+        "Description" AS [DL_DISTRIBUTION_GROUP_DESCRIPTION],
+        "Enabled" AS [DL_DISTRIBUTION_GROUP_ENABLED]
+    Resident TempGroups;
+else
+
+    DL_DISTRIBUTION_SVC_GROUPS_QCS:
+    REPLACE LOAD
+        "Name" AS [DL_DISTRIBUTION_GROUP_NAMES],
+        "Description" AS [DL_DISTRIBUTION_GROUP_DESCRIPTION],
+        1 AS [DL_DISTRIBUTION_GROUP_ENABLED]
+    Resident TempGroups;
+end if
+
+Drop Table TempGroups;
+
+tag field DL_DISTRIBUTION_RECIPIENT_NAME with 'DL_DISTRIBUTION_SVC__recipientName';
+tag field DL_DISTRIBUTION_EMAIL with 'DL_DISTRIBUTION_SVC__recipientEmail';
+tag field DL_DISTRIBUTION_FILTERS with 'DL_DISTRIBUTION_SVC__recipientFilters';
+tag field DL_DISTRIBUTION_GROUP_NAMES with 'DL_DISTRIBUTION_SVC__groupsName';
+tag field DL_DISTRIBUTION_GROUP_DESCRIPTION with 'DL_DISTRIBUTION_SVC__groupDescription';
+tag field DL_DISTRIBUTION_GROUP_ENABLED with 'DL_DISTRIBUTION_SVC__groupEnabled';
