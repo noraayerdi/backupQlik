@@ -1,0 +1,555 @@
+///$tab Main
+SET ThousandSep='.';
+SET DecimalSep=',';
+SET MoneyThousandSep='.';
+SET MoneyDecimalSep=',';
+SET MoneyFormat='#.##0,00 €;-#.##0,00 €';
+SET TimeFormat='h:mm:ss TT';
+SET DateFormat='DD/MM/YYYY';
+SET TimestampFormat='DD/MM/YYYY h:mm:ss[.fff]';
+SET FirstWeekDay=0;
+SET BrokenWeeks=0;
+SET ReferenceDay=4;
+SET FirstMonthOfYear=1;
+SET CollationLocale='es-ES';
+SET CreateSearchIndexOnReload=1;
+SET MonthNames='ene.;feb.;mar.;abr.;may.;jun.;jul.;ago.;sep.;oct.;nov.;dic.';
+SET LongMonthNames='enero;febrero;marzo;abril;mayo;junio;julio;agosto;septiembre;octubre;noviembre;diciembre';
+SET DayNames='lu.;ma.;mi.;ju.;vi.;sá.;do.';
+SET LongDayNames='lunes;martes;miercoles;jueves;viernes;sabado;domingo';
+SET NumericalAbbreviation='3:k;6:M;9:G;12:T;15:P;18:E;21:Z;24:Y;-3:m;-6:μ;-9:n;-12:p;-15:f;-18:a;-21:z;-24:y';
+
+///$tab Sección
+
+///$tab Receta Primera Versión Fab.
+/*
+// ESR 05-09-2025 Me ha creado todo esto automáticamente pero creo que no lo necesito
+Set dataManagerTables = '','V_RecetaPrimeraV';
+//This block renames script tables from non generated section which conflict with the names of managed tables
+
+For each name in $(dataManagerTables) 
+    Let index = 0;
+    Let currentName = name; 
+    Let tableNumber = TableNumber(name); 
+    Let matches = 0; 
+    Do while not IsNull(tableNumber) or (index > 0 and matches > 0)
+        index = index + 1; 
+        currentName = name & '-' & index; 
+        tableNumber = TableNumber(currentName) 
+        matches = Match('$(currentName)', $(dataManagerTables));
+    Loop 
+    If index > 0 then 
+            Rename Table '$(name)' to '$(currentName)'; 
+    EndIf; 
+Next; 
+Set dataManagerTables = ;
+*/
+
+/*
+Unqualify *;
+
+LIB CONNECT TO [Desarrollo:AzureSQLServer];
+
+[V_RecetaPrimeraV]:
+SELECT
+    Referencia,
+    ReferenciaComponente,
+    OrdenComponente,
+    Cantidad,
+    UnidadMedida,
+    OrdenSustituto,
+    Validez,
+    Centro,
+    ListaMateriales,
+    NumeroLista,
+    NumeroNodo
+FROM BBDD_SQL_Datalake.DATALAKE.V_RecetaPrimeraV;
+*/
+
+
+
+
+
+
+///$tab Map
+MapaFamilia:
+mapping 
+LOAD
+    Referencia,
+	Familia
+FROM [lib://Datos:DataFiles/Dim_Materiales.qvd]
+(qvd)
+WHERE IdiomaID = 'S';
+//WHERE IdiomaID = 'S' and Vigente = 1;
+
+MapaDescripcion:
+mapping 
+LOAD
+    Referencia,
+	DescripcionLarga as Articulo
+FROM [lib://Datos:DataFiles/Dim_Materiales.qvd]
+(qvd)
+WHERE IdiomaID = 'S';
+//WHERE IdiomaID = 'S' and Vigente = 1;
+
+MapaCodProceso:
+mapping 
+LOAD
+    Referencia,
+	Proceso
+FROM [lib://Datos:DataFiles/Dim_Materiales.qvd]
+(qvd)
+WHERE IdiomaID = 'S';
+//WHERE IdiomaID = 'S' and Vigente = 1;
+///$tab Recetas
+//============================================================================================================================================
+// Aplicación:          		CN - Trazabilidad
+// Autor:               		Javi Castro
+// Fecha Creación:      		10-11-2025
+// Objetivo de la App:  		Aplicación que obtener el listado de recetas (una única receta por referencia)
+// Objetivo de la pestaña:   	Maestro Recetas
+//============================================================================================================================================
+
+/*
+Recetas:
+LOAD
+    Referencia as RecetaReferencia,
+    ComponenteReferencia,
+    Applymap('MapaFamilia', ComponenteReferencia) AS ComponenteFamilia,
+    if(alt(num( EVALUATE(ComponenteReferencia),'#0'),ComponenteReferencia)='2308103371',null(), Applymap('MapaFamilia',ComponenteReferencia,'') & '-' &  Applymap('MapaCodProceso', ComponenteReferencia,'NA')) AS ComponenteFamiliaProceso,
+    OrdenComponente,
+    EsSustitutoComponente,
+    CantidadComponente,
+    UMComponente,
+    PlantaComponente,
+    VigenteComponente,
+    TipoMaterialComponente,
+    ComponenteSinReceta
+FROM [lib://Datos:DataFiles/Dim_Receta.qvd]
+(qvd) WHERE VigenteComponente = 1 and (TipoMaterialComponente = 'ZG14' OR TipoMaterialComponente = 'ZG15' OR TipoMaterialComponente = 'ZG16' OR TipoMaterialComponente = 'ZG23');
+//(qvd) WHERE VigenteComponente = 1 and ComponenteReferencia <> '2308103371';
+*/
+
+Recetas_Materiales:
+LOAD
+    MandanteID,
+    Referencia as RecetaReferencia,
+    Applymap('MapaDescripcion', Referencia) AS RecetasMateriales_RecetaDescripcion,
+    PDU_Planta as RecetasMateriales_Planta,
+    ListaID,
+    ListaMateriales,
+    NumeroLista AS RecetasMateriales_NumeroLista,
+    NumeroNodo,
+    TipoLista,
+    ReferenciaArticuloListaMateriales AS RecetasMateriales_ComponenteReferencia,
+    Applymap('MapaDescripcion', ReferenciaArticuloListaMateriales) AS RecetasMateriales_ComponenteDescripcion,
+    Applymap('MapaFamilia', ReferenciaArticuloListaMateriales) AS RecetasMateriales_ComponenteFamilia,
+    if(alt(num( EVALUATE(ReferenciaArticuloListaMateriales),'#0'),ReferenciaArticuloListaMateriales)='2308103371',null(), Applymap('MapaFamilia',ReferenciaArticuloListaMateriales,'') & '-' &  Applymap('MapaCodProceso', ReferenciaArticuloListaMateriales,'NA')) AS RecetasMateriales_ComponenteFamiliaProceso,
+    Cantidad AS RecetasMateriales_Cantidad,
+    NumeroGrupo,
+    OrdenComponente,
+    OrdenSustituto,
+    if(OrdenSustituto='00' OR OrdenSustituto='01','','SUSTITUTO') AS RecetasMateriales_ES_SUSTITUTO,
+    UnidadMedida as RecetasMateriales_Unidad,
+    Validez,
+    VigenteReceta,
+    TipoMaterialReceta as RecetasMateriales_TipoMaterialReceta,
+    TipoMaterialComponente as RecetasMateriales_TipoMaterialComponente
+FROM [lib://Datos:DataFiles/Dim_MaterialesReceta.qvd]
+(qvd) WHERE VigenteReceta = 1;
+
+
+
+Receta_Completa:
+LOAD
+    Receta_Codigo AS RecetaReferencia,
+    Applymap('MapaFamilia', Receta_Codigo) AS RECETA_COMPLETA_FAMILIA,
+    Applymap('MapaDescripcion', Receta_Codigo) AS RECETA_COMPLETA_DESCRIPCION,
+    Componente_Codigo_Corto_Receta_Completa AS RECETA_COMPLETA_COMPONENTE_REFERENCIA_CORTO,
+    Componente_Codigo_Receta_Completa AS RECETA_COMPLETA_COMPONENTE_REFERENCIA,
+    Applymap('MapaFamilia', Componente_Codigo_Receta_Completa) AS RECETA_COMPLETA_COMPONENTE_FAMILIA,
+    Applymap('MapaDescripcion', Componente_Codigo_Receta_Completa) AS RECETA_COMPLETA_COMPONENTE_DESCRIPCION,
+    if(alt(num( EVALUATE(Componente_Codigo_Receta_Completa),'#0'),Componente_Codigo_Receta_Completa)='2308103371',null(), Applymap('MapaFamilia',Componente_Codigo_Receta_Completa,'') & '-' &  Applymap('MapaCodProceso', Componente_Codigo_Receta_Completa,'NA')) AS RECETA_COMPLETA_ComponenteFamiliaProceso,
+    //Orden_Componente_Receta_Completa,
+    //Orden_Sustituto_Receta_Completa,
+    Es_Sustituto_Receta_Completa AS RECETA_COMPLETA_ES_SUSTITUTO,
+    Cantidad_Receta_Completa AS RECETA_COMPLETA_CANTIDAD,
+    UM_Receta_Completa AS RECETA_COMPLETA_UNIDAD,
+    //Lista_Alternativa_Receta_Completa,
+    //Lista_Alternativa_Numero_Receta_Completa,
+    Planta_Receta_Completa AS RECETA_COMPLETA_PLANTA
+    //Alternativa_PorDefecto,
+    //VigenteReceta,
+    //TipoMaterialReceta
+FROM [lib://Datos:DataFiles/Dim_RecetaCompleta.qvd]
+(qvd) WHERE VigenteReceta = 1 and Componente_Codigo_Receta_Completa <> '2308103371';
+
+ListaMaterialesRecursiva:
+LOAD
+    Receta_Codigo as RecetaReferencia,
+    Componente_Codigo_Receta_Completa AS ListaMaterialesRecursiva_ComponenteReferencia,
+    Applymap('MapaDescripcion', Componente_Codigo_Receta_Completa) AS ListaMaterialesRecursiva_ComponenteDescripcion,
+    Applymap('MapaFamilia', Componente_Codigo_Receta_Completa) AS ListaMaterialesRecursiva_ComponenteFamilia,
+    Orden_Componente_Receta_Completa AS ListaMaterialesRecursiva_OrdenComponente,
+    Orden_Sustituto_Receta_Completa AS ListaMaterialesRecursiva_OrdenSustituto,
+    Es_Sustituto_Receta_Completa as ListaMaterialesRecursiva_EsSustituto,
+    UM_Receta_Completa as ListaMaterialesRecursiva_Unidad,
+    Planta_Receta_Completa as ListaMaterialesRecursiva_Planta,
+    VigenteReceta as ListaMaterialesRecursiva_VigenteReceta,
+    TipoMaterialReceta as ListaMaterialesRecursiva_TipoMaterialReceta,
+    Cantidad_Receta_Completa as ListaMaterialesRecursiva_CantidadRecetaCompleta
+FROM [lib://Datos:DataFiles/Dim_ListaMaterialesRecursiva.qvd]
+(qvd) WHERE Left(Applymap('MapaDescripcion', Componente_Codigo_Receta_Completa), 9) <> 'REMANENTE';
+
+///$tab Puntos de uso
+//============================================================================================================================================
+// Aplicación:          		CN - Trazabilidad
+// Autor:               		Javi Castro
+// Fecha Creación:      		12-11-2025
+// Objetivo de la App:  		Aplicación que obtener el listado de recetas (una única receta por referencia)
+// Objetivo de la pestaña:   	Maestro Receta Completa F3002
+//============================================================================================================================================
+
+Receta_Completa_PUNTOS_DE_USO:
+LOAD
+    Referencia AS PDU_RECETA_CODIGO,
+    Applymap('MapaFamilia', Referencia) AS PDU_RECETA_FAMILIA,
+    Applymap('MapaDescripcion', Referencia) AS PDU_RECETA_DESCRIPCION,
+    //Componente_Codigo_Corto_Receta_Completa AS PDU_COMPONENTE_CORTO,
+    ReferenciaArticuloListaMateriales AS RecetaReferencia,
+    Applymap('MapaFamilia', ReferenciaArticuloListaMateriales) AS PDU_COMPONENTE_FAMILIA,
+    Applymap('MapaDescripcion', ReferenciaArticuloListaMateriales) AS PDU_COMPONENTE_DESCRIPCION,
+    //Orden_Componente_Receta_Completa,
+    //Orden_Sustituto_Receta_Completa,
+    '' AS PDU_ES_SUSTITUTO,
+    Cantidad AS PDU_CANTIDAD,
+    //UM_Receta_Completa,
+    //Lista_Alternativa_Receta_Completa,
+    //Lista_Alternativa_Numero_Receta_Completa,
+    PDU_Planta AS PDU_PLANTA,
+    //Alternativa_PorDefecto,
+    //VigenteReceta,
+    //TipoMaterialReceta
+    1 as PDU_CONTADOR
+FROM [lib://Datos:DataFiles/Dim_MaterialesReceta.qvd]
+(qvd) WHERE VigenteReceta = 1;
+
+Receta_Completa_PUNTOS_DE_USO_NIVEL2:
+LOAD
+    Referencia AS PDU2_RECETA_CODIGO,
+    Applymap('MapaFamilia', Referencia) AS PDU2_RECETA_FAMILIA,
+    Applymap('MapaDescripcion', Referencia) AS PDU2_RECETA_DESCRIPCION,
+    //Componente_Codigo_Corto_Receta_Completa AS PDU2_COMPONENTE_CORTO,
+    ReferenciaArticuloListaMateriales AS PDU_RECETA_CODIGO,
+    Applymap('MapaFamilia', ReferenciaArticuloListaMateriales) AS PDU2_COMPONENTE_FAMILIA,
+    Applymap('MapaDescripcion', ReferenciaArticuloListaMateriales) AS PDU2_COMPONENTE_DESCRIPCION,
+    //Orden_Componente_Receta_Completa,
+    //Orden_Sustituto_Receta_Completa,
+    '' AS PDU2_ES_SUSTITUTO,
+    Cantidad AS PDU2_CANTIDAD,
+    //UM_Receta_Completa,
+    //Lista_Alternativa_Receta_Completa,
+    //Lista_Alternativa_Numero_Receta_Completa,
+    PDU_Planta AS PDU2_PLANTA,
+    //Alternativa_PorDefecto,
+    //VigenteReceta,
+    //TipoMaterialReceta
+    1 as PDU2_CONTADOR
+FROM [lib://Datos:DataFiles/Dim_MaterialesReceta.qvd]
+(qvd) WHERE VigenteReceta = 1;
+
+Receta_Completa_PUNTOS_DE_USO_NIVEL3:
+LOAD
+    Referencia AS PDU3_RECETA_CODIGO,
+    Applymap('MapaFamilia', Referencia) AS PDU3_RECETA_FAMILIA,
+    Applymap('MapaDescripcion', Referencia) AS PDU3_RECETA_DESCRIPCION,
+    //Componente_Codigo_Corto_Receta_Completa AS PDU3_COMPONENTE_CORTO,
+    ReferenciaArticuloListaMateriales AS PDU2_RECETA_CODIGO,
+    Applymap('MapaFamilia', ReferenciaArticuloListaMateriales) AS PDU3_COMPONENTE_FAMILIA,
+    Applymap('MapaDescripcion', ReferenciaArticuloListaMateriales) AS PDU3_COMPONENTE_DESCRIPCION,
+    //Orden_Componente_Receta_Completa,
+    //Orden_Sustituto_Receta_Completa,
+    '' AS PDU3_ES_SUSTITUTO,
+    Cantidad AS PDU3_CANTIDAD,
+    //UM_Receta_Completa,
+    //Lista_Alternativa_Receta_Completa,
+    //Lista_Alternativa_Numero_Receta_Completa,
+    PDU_Planta AS PDU3_PLANTA,
+    //Alternativa_PorDefecto,
+    //VigenteReceta,
+    //TipoMaterialReceta
+    1 as PDU3_CONTADOR
+FROM [lib://Datos:DataFiles/Dim_MaterialesReceta.qvd]
+(qvd) WHERE VigenteReceta = 1;
+
+// Receta_Completa_PUNTOS_DE_USO:
+// LOAD
+//     Receta_Codigo AS PDU_RECETA_CODIGO,
+//     Applymap('MapaFamilia', Receta_Codigo) AS PDU_RECETA_FAMILIA,
+//     Applymap('MapaDescripcion', Receta_Codigo) AS PDU_RECETA_DESCRIPCION,
+//     Componente_Codigo_Corto_Receta_Completa AS PDU_COMPONENTE_CORTO,
+//     Componente_Codigo_Receta_Completa AS RecetaReferencia,
+//     Applymap('MapaFamilia', Componente_Codigo_Receta_Completa) AS PDU_COMPONENTE_FAMILIA,
+//     Applymap('MapaDescripcion', Componente_Codigo_Receta_Completa) AS PDU_COMPONENTE_DESCRIPCION,
+//     //Orden_Componente_Receta_Completa,
+//     //Orden_Sustituto_Receta_Completa,
+//     Es_Sustituto_Receta_Completa AS PDU_ES_SUSTITUTO,
+//     Cantidad_Receta_Completa AS PDU_CANTIDAD,
+//     //UM_Receta_Completa,
+//     //Lista_Alternativa_Receta_Completa,
+//     //Lista_Alternativa_Numero_Receta_Completa,
+//     Planta_Receta_Completa AS PDU_PLANTA,
+//     //Alternativa_PorDefecto,
+//     //VigenteReceta,
+//     //TipoMaterialReceta
+//     1 as PDU_CONTADOR
+// FROM [lib://Datos:DataFiles/Dim_RecetaCompleta.qvd]
+// (qvd) WHERE VigenteReceta = 1;
+
+// Receta_Completa_PUNTOS_DE_USO_NIVEL2:
+// LOAD
+//     Receta_Codigo AS PDU2_RECETA_CODIGO,
+//     Applymap('MapaFamilia', Receta_Codigo) AS PDU2_RECETA_FAMILIA,
+//     Applymap('MapaDescripcion', Receta_Codigo) AS PDU2_RECETA_DESCRIPCION,
+//     Componente_Codigo_Corto_Receta_Completa AS PDU2_COMPONENTE_CORTO,
+//     Componente_Codigo_Receta_Completa AS PDU_RECETA_CODIGO,
+//     Applymap('MapaFamilia', Componente_Codigo_Receta_Completa) AS PDU2_COMPONENTE_FAMILIA,
+//     Applymap('MapaDescripcion', Componente_Codigo_Receta_Completa) AS PDU2_COMPONENTE_DESCRIPCION,
+//     //Orden_Componente_Receta_Completa,
+//     //Orden_Sustituto_Receta_Completa,
+//     Es_Sustituto_Receta_Completa AS PDU2_ES_SUSTITUTO,
+//     Cantidad_Receta_Completa AS PDU2_CANTIDAD,
+//     //UM_Receta_Completa,
+//     //Lista_Alternativa_Receta_Completa,
+//     //Lista_Alternativa_Numero_Receta_Completa,
+//     Planta_Receta_Completa AS PDU2_PLANTA,
+//     //Alternativa_PorDefecto,
+//     //VigenteReceta,
+//     //TipoMaterialReceta
+//     1 as PDU2_CONTADOR
+// FROM [lib://Datos:DataFiles/Dim_RecetaCompleta.qvd]
+// (qvd) WHERE VigenteReceta = 1;
+
+// Receta_Completa_PUNTOS_DE_USO_NIVEL3:
+// LOAD
+//     Receta_Codigo AS PDU3_RECETA_CODIGO,
+//     Applymap('MapaFamilia', Receta_Codigo) AS PDU3_RECETA_FAMILIA,
+//     Applymap('MapaDescripcion', Receta_Codigo) AS PDU3_RECETA_DESCRIPCION,
+//     Componente_Codigo_Corto_Receta_Completa AS PDU3_COMPONENTE_CORTO,
+//     Componente_Codigo_Receta_Completa AS PDU2_RECETA_CODIGO,
+//     Applymap('MapaFamilia', Componente_Codigo_Receta_Completa) AS PDU3_COMPONENTE_FAMILIA,
+//     Applymap('MapaDescripcion', Componente_Codigo_Receta_Completa) AS PDU3_COMPONENTE_DESCRIPCION,
+//     //Orden_Componente_Receta_Completa,
+//     //Orden_Sustituto_Receta_Completa,
+//     Es_Sustituto_Receta_Completa AS PDU3_ES_SUSTITUTO,
+//     Cantidad_Receta_Completa AS PDU3_CANTIDAD,
+//     //UM_Receta_Completa,
+//     //Lista_Alternativa_Receta_Completa,
+//     //Lista_Alternativa_Numero_Receta_Completa,
+//     Planta_Receta_Completa AS PDU3_PLANTA,
+//     //Alternativa_PorDefecto,
+//     //VigenteReceta,
+//     //TipoMaterialReceta
+//     1 as PDU3_CONTADOR
+// FROM [lib://Datos:DataFiles/Dim_RecetaCompleta.qvd]
+// (qvd) WHERE VigenteReceta = 1;
+///$tab Materiales Receta
+//============================================================================================================================================
+// Aplicación:          		CN - Trazabilidad
+// Autor:               		Elva Salinas
+// Fecha Creación:      		05-09-2025
+// Objetivo de la App:  		Aplicación que obtener el listado de recetas (una única receta por referencia)
+// Objetivo de la pestaña:   	Maestro Materiales Receta
+//============================================================================================================================================
+
+MaterialesReceta:
+LOAD
+    Referencia as RecetaReferencia,
+    //Articulo as Receta,
+    DescripcionLarga as Receta,
+    "Referencia-Articulo" as [Referencia-Articulo Receta],
+    //IdiomaID,
+    FamiliaID as [Familia ID Receta],
+    PesoPalet as [Peso Palet Receta],
+    PesoCaja as [Peso Caja Receta],
+    PesoBolsa as [Peso Bolsa Receta],
+    UnidadMedida as [UM Receta],
+    Familia as [Familia Receta],
+    TipoMaterial as [Tipo Material Receta],
+    MarcaID as [Marca ID Receta],
+    Marca as [Marca Receta],
+    ColorID as [Color ID Receta],
+    "Color" as [Color Receta],
+    ProcesoID as [Proceso ID Receta],
+    Proceso as [Proceso Receta],
+    EnvaseID as [Envase ID Receta],
+    Envase as [Envase Receta],
+    CalibreID as [Calibre ID Receta],
+    Calibre as [Calibre Receta],
+    FormaID as [Forma ID Receta],
+    Forma as [Forma Receta],
+    MTO_MTSID as [MTO/MTS ID Receta],
+    MTO_MTS as [MTO/MTS Receta],
+    CicloDeVidaID as [Ciclo Vida ID Receta],
+    CicloDeVida as [Ciclo Vida Receta],
+    AlturaID as [Altura ID Receta],
+    AlturaMaximaID as [Altura Máxima ID Receta],
+    AlturaMaxima as [Altura Máxima Receta],
+    BabyFood as [Baby Food Receta],
+    BaseID as [Base ID Receta],
+    CalidadID as [Calidad ID Receta],
+    Calidad as [Calidad Receta],
+    CategoriaID as [Categoría ID Receta],
+    Categoria as [Categoría Receta],
+    CorteCalibreID as [Corte Calibre ID Receta],
+    CorteCalibre as [Corte Calibre Receta],
+    EcologicoID as [Ecológico ID Receta],
+    FormatoID as [Formato ID Receta],
+    Formato as [Formato Receta],
+    LongitudID as [Longitud ID Receta],
+    Longitud as [Longitud Receta],
+    MosaicoID as [Mosaico ID Receta],
+    Mosaico as [Mosaico Receta],
+    MultiProductoID as [MultiProducto ID Receta],
+    PaletEspecial as [Palet Especial Receta],
+    PaletEspecialID as [Palet Especial ID Receta],
+    RemontadoID as [Remontado ID Receta],
+    Remontado as [Remontado Receta],
+    RotacionID as [Rotación ID Receta],
+    Rotacion as [Rotación Receta],
+    RotacionID2 as [Rotación 2 ID Receta],
+    TaraID as [Tara ID Receta],
+    Tara as [Tara Receta],
+    TenderometriaID as [Tenderometría ID Receta],
+    Tenderometria as [Tenderometría Receta],
+    TipoFilmID as [Tipo Film ID Receta],
+    TipoFilm as [Tipo Film Receta],
+    UnidadesEnvaseID as [Unidades Envase ID Receta],
+    UnidadesEnvase as [Unidades Envase Receta],
+    IF(Vigente = 1, 'Si', 'No') as [Vigente Receta],
+    "Maestro Materiales" as [Origen Maestro Receta],
+    MaterialCongel as [Material Congelado Receta],
+    GramosFormato as [Gramos Formato Receta],
+    "Categoria Especial Formato" as [Categoría Especial Formato Receta],
+    NivelServicioFilm as [Nivel Servicio Film Receta],
+    CicloDeVidaFecha as [Fecha Ciclo Vida Receta]
+FROM [lib://Datos:DataFiles/Dim_Materiales.qvd]
+(qvd)
+WHERE IdiomaID = 'S' and Vigente = 1;
+
+
+
+///$tab Materiales Componente
+//============================================================================================================================================
+// Aplicación:          		CN - Trazabilidad
+// Autor:               		Elva Salinas
+// Fecha Creación:      		05-09-2025
+// Objetivo de la App:  		Aplicación que obtener el listado de recetas (una única receta por referencia)
+// Objetivo de la pestaña:   	Maestro Materiales Componente
+//============================================================================================================================================
+
+MaterialesComponente:
+LOAD
+    Referencia as ComponenteReferencia,
+    //Articulo as Componente,
+    DescripcionLarga as Componente,
+    "Referencia-Articulo" as [Referencia-Articulo Componente],
+    //IdiomaID,
+    FamiliaID as [Familia ID Componente],
+    PesoPalet as [Peso Palet Componente],
+    PesoCaja as [Peso Caja Componente],
+    PesoBolsa as [Peso Bolsa Componente],
+    UnidadMedida as [UM Componente],
+    Familia as [Familia Componente],
+    TipoMaterial as [Tipo Material Componente],
+    MarcaID as [Marca ID Componente],
+    Marca as [Marca Componente],
+    ColorID as [Color ID Componente],
+    "Color" as [Color Componente],
+    ProcesoID as [Proceso ID Componente],
+    Proceso as [Proceso Componente],
+    EnvaseID as [Envase ID Componente],
+    Envase as [Envase Componente],
+    CalibreID as [Calibre ID Componente],
+    Calibre as [Calibre Componente],
+    FormaID as [Forma ID Componente],
+    Forma as [Forma Componente],
+    MTO_MTSID as [MTO/MTS ID Componente],
+    MTO_MTS as [MTO/MTS Componente],
+    CicloDeVidaID as [Ciclo Vida ID Componente],
+    CicloDeVida as [Ciclo Vida Componente],
+    AlturaID as [Altura ID Componente],
+    AlturaMaximaID as [Altura Máxima ID Componente],
+    AlturaMaxima as [Altura Máxima Componente],
+    BabyFood as [Baby Food Componente],
+    BaseID as [Base ID Componente],
+    CalidadID as [Calidad ID Componente],
+    Calidad as [Calidad Componente],
+    CategoriaID as [Categoría ID Componente],
+    Categoria as [Categoría Componente],
+    CorteCalibreID as [Corte Calibre ID Componente],
+    CorteCalibre as [Corte Calibre Componente],
+    EcologicoID as [Ecológico ID Componente],
+    FormatoID as [Formato ID Componente],
+    Formato as [Formato Componente],
+    LongitudID as [Longitud ID Componente],
+    Longitud as [Longitud Componente],
+    MosaicoID as [Mosaico ID Componente],
+    Mosaico as [Mosaico Componente],
+    MultiProductoID as [MultiProducto ID Componente],
+    PaletEspecial as [Palet Especial Componente],
+    PaletEspecialID as [Palet Especial ID Componente],
+    RemontadoID as [Remontado ID Componente],
+    Remontado as [Remontado Componente],
+    RotacionID as [Rotación ID Componente],
+    Rotacion as [Rotación Componente],
+    RotacionID2 as [Rotación 2 ID Componente],
+    TaraID as [Tara ID Componente],
+    Tara as [Tara Componente],
+    TenderometriaID as [Tenderometría ID Componente],
+    Tenderometria as [Tenderometría Componente],
+    TipoFilmID as [Tipo Film ID Componente],
+    TipoFilm as [Tipo Film Componente],
+    UnidadesEnvaseID as [Unidades Envase ID Componente],
+    UnidadesEnvase as [Unidades Envase Componente],
+    IF(Vigente = 1, 'Si', 'No') as [Vigente Componente],
+    "Maestro Materiales" as [Origen Maestro Componente],
+    MaterialCongel as [Material Congelado Componente],
+    GramosFormato as [Gramos Formato Componente],
+    "Categoria Especial Formato" as [Categoría Especial Formato Componente],
+    NivelServicioFilm as [Nivel Servicio Film Componente],
+    CicloDeVidaFecha as [Fecha Ciclo Vida Componente]
+FROM [lib://Datos:DataFiles/Dim_Materiales.qvd]
+(qvd)
+WHERE IdiomaID = 'S';
+
+
+
+///$tab Alergenos y trazas
+//============================================================================================================================================
+// Aplicación:          		CN - Trazabilidad
+// Autor:               		Javi Castro
+// Fecha Creación:      		10-11-2025
+// Objetivo de la App:  		Aplicación que obtener el listado de Alergenos y Trazas
+// Objetivo de la pestaña:   	Maestro Alernos y Trazas
+//============================================================================================================================================
+
+RECETA_ALERGENOS:
+LOAD
+    Referencia as RecetaReferencia,
+    AlergenoID as Receta_alergeno_cod,
+    /*IdiomaID,*/
+    Descripcion as Receta_alergeno
+FROM [lib://Datos:DataFiles/Dim_ArticulosAlergenos.qvd] 
+(qvd) WHERE IdiomaID = 'S';
+
+RECETA_TRAZAS:
+LOAD
+    Referencia as RecetaReferencia,
+    TrazaID as Receta_traza_cod,
+    /*IdiomaID,*/
+    Descripcion as Receta_traza
+FROM [lib://Datos:DataFiles/Dim_ArticulosTrazas.qvd] 
+(qvd) WHERE IdiomaID = 'S';
+
+
